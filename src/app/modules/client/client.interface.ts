@@ -21,7 +21,7 @@ export interface IClient {
   shopName: string;
   shopCategory: string;
   shopGenderCategory: (typeof ENUM_GENDER)[keyof typeof ENUM_GENDER];
-  shopImages: [string];
+  shopImages: string[];
   location: ILocation;
   address?: string | null;
   profile_image: string;
@@ -41,3 +41,11 @@ export interface IClient {
   stripAccountId: string;
   isStripeConnected: boolean;
 }
+
+export type TUpdateClientProfilePayload = Omit<
+  Partial<IClient>,
+  'shopImages'
+> & {
+  deleteImages?: string[];
+  newShopImages?: string[];
+};

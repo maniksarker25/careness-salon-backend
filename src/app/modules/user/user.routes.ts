@@ -27,11 +27,11 @@ router.post(
 );
 router.post(
   '/create-admin',
+  auth(USER_ROLE.superAdmin),
   validateRequest(AdminValidations.registerAdminValidationSchema),
   userControllers.registerAdmin,
 );
 
-router.post('/register-Admin');
 router.get(
   '/get-my-profile',
   authWithoutActive(

@@ -22,16 +22,32 @@ import Discount from '../discount/discount.model';
 import Service from '../service/service.model';
 import ShopCategory from '../shopCategory/shopCategory.model';
 import { User } from '../user/user.model';
-import { IClient } from './client.interface';
+import { IClient, TUpdateClientProfilePayload } from './client.interface';
 import Client from './client.model';
 const stripe = new Stripe(config.stripe.stripe_secret_key as string);
 const toStripeAmount = (amount: number) => Math.round(amount * 100);
 const updateClientProfile = async (
   userId: string,
-  payload: Partial<IClient>,
+  payload: TUpdateClientProfilePayload,
 ) => {
-  console.log('updateClientProfile', payload);
-  const result = await Client.findOneAndUpdate({ user: userId }, payload, {
+  const { deleteImages = [], newShopImages, ...profileUpdates } = payload;
+  const updatePayload: Partial<IClient> = profileUpdates;
+
+  if (deleteImages.length > 0 || (newShopImages?.length ?? 0) > 0) {
+    const client = await Client.findOne({ user: userId }).select('shopImages');
+    if (!client) {
+      throw new AppError(httpStatus.NOT_FOUND, 'Client not found');
+    }
+
+    updatePayload.shopImages = [
+      ...(client.shopImages || []).filter(
+        (image: string) => !deleteImages.includes(image),
+      ),
+      ...(newShopImages || []),
+    ];
+  }
+
+  const result = await Client.findOneAndUpdate({ user: userId }, updatePayload, {
     new: true,
     runValidators: true,
   });

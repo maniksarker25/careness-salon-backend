@@ -10,7 +10,7 @@ const updateClientProfile = catchAsync(async (req, res) => {
     req.body.profile_image = files['profile_image'][0].path;
   }
   if (files && typeof files === 'object' && 'shop_image' in files) {
-    req.body.shopImages = files['shop_image'].map((file) => file.path);
+    req.body.newShopImages = files['shop_image'].map((file) => file.path);
   }
 
   const result = await ClientServices.updateClientProfile(

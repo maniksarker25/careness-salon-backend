@@ -97,7 +97,7 @@ const updateClientProfileValidationSchema = z.object({
       .nonempty()
       .optional(),
     shopGenderCategory: z.nativeEnum(ENUM_GENDER).optional(),
-    shopImages: z.array(z.string()).optional(),
+    deleteImages: z.array(z.string()).optional(),
     location: locationSchema,
     profile_image: z.string().optional(),
     bankName: z.string({ required_error: 'Bank name is required' }).optional(),

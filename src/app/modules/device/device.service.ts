@@ -7,6 +7,13 @@ export const upsertDevice = async (
 ) => {
   if (!playerId) return;
 
+  // A OneSignal subscription belongs to one account on this app install.
+  // Disable its previous account mapping before registering the new owner.
+  await Device.updateMany(
+    { playerId, userId: { $ne: userId }, isActive: true },
+    { isActive: false },
+  );
+
   return await Device.findOneAndUpdate(
     { userId, playerId },
     {
