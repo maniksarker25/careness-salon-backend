@@ -243,6 +243,7 @@ const getMyProfile = async (email: string, role: string) => {
     const data = await Client.findOne({ email: email });
     const accountReady = await isAccountReady(data.stripAccountId);
     const totalStaff = await Staff.countDocuments({ shop: data._id });
+    data.isStripeConnected = accountReady;
     result = {
       ...data.toObject(),
       isAccountReady: accountReady,
