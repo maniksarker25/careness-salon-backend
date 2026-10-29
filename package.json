@@ -4,9 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "build": "tsc",
-    "start:dev": " ts-node-dev --respawn --transpile-only src/server.ts",
-    "start:prod": "./dist/server.js",
+    "build": "node init && tsc",
+    "start:dev": "node init &&  ts-node-dev --respawn --transpile-only src/server.ts",
+    "start:prod": "node init && ./dist/server.js",
     "lint": "eslint src --ignore-path .eslintignore --ext .ts",
     "lint:fix": " npx eslint src --fix",
     "prettier": "prettier --ignore-path .gitignore --write \"./src**/*.+(js|ts|json)\"",
