@@ -16,7 +16,11 @@ const createService = catchAsync(async (req, res) => {
   });
 });
 const updateService = catchAsync(async (req, res) => {
-  const result = await ServiceService.updateService(req.params.id, req.body);
+  const result = await ServiceService.updateService(
+    req.user.profileId,
+    req.params.id,
+    req.body,
+  );
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -25,7 +29,10 @@ const updateService = catchAsync(async (req, res) => {
   });
 });
 const deleteService = catchAsync(async (req, res) => {
-  const result = await ServiceService.deleteService(req.params.id);
+  const result = await ServiceService.deleteService(
+    req.user.profileId,
+    req.params.id,
+  );
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,

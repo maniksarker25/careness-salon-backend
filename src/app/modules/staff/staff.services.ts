@@ -70,23 +70,30 @@ const createStaffIntoDB = async (profileId: string, payload: IStaff) => {
 };
 
 // update staff
-const updateStaffIntoDB = async (id: string, payload: Partial<IStaff>) => {
-  const staff = await Staff.findById(id);
-  if (!staff) {
+const updateStaffIntoDB = async (
+  shopId: string,
+  id: string,
+  payload: Partial<IStaff>,
+) => {
+  const { shop: _shop, ...update } = payload;
+  const result = await Staff.findOneAndUpdate(
+    { _id: id, shop: shopId },
+    update,
+    { new: true, runValidators: true },
+  );
+  if (!result) {
     throw new AppError(httpStatus.NOT_FOUND, 'Staff not found');
   }
-
-  const result = await Staff.findByIdAndUpdate(id, payload, {
-    new: true,
-    runValidators: true,
-  });
   return result;
 };
 
-const deleteStaffFromDB = async (id: string) => {
-  await Staff.findByIdAndDelete(id);
-  await BusinessHour.deleteMany({ entityId: id, entityType: 'Staff' });
-  return null;
+const deleteStaffFromDB = async (shopId: string, id: string) => {
+  const staff = await Staff.findOneAndDelete({ _id: id, shop: shopId });
+  if (!staff) {
+    throw new AppError(httpStatus.NOT_FOUND, 'Staff not found');
+  }
+  await BusinessHour.deleteMany({ entityId: staff._id, entityType: 'Staff' });
+  return staff;
 };
 
 const getAllStaff = async (query: Record<string, any>) => {

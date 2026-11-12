@@ -30,6 +30,7 @@ import {
 } from '../../utilities/enum';
 import Client from '../client/client.model';
 import Customer from '../customer/customer.model';
+import { ENUM_NOTIFICATION_TYPE as NOTIFICATION_EVENT_TYPE } from '../notification/notification.enum';
 import Notification from '../notification/notification.model';
 import Transaction from '../transaction/transaction.model';
 import { USER_ROLE } from '../user/user.constant';
@@ -46,9 +47,50 @@ import {
 } from '../../utilities/salonTime';
 import { REVENUE_BOOKING_MATCH } from './booking.revenue';
 import { assertWithinBusinessHours } from '../bussinessHour/businessHour.utils';
+import {
+  claimBookingFinancialOperation,
+  processBookingFinancialOperation,
+} from './bookingFinancialOperation.service';
+import { BOOKING_FINANCIAL_OPERATION_TYPE } from './bookingFinancialOperation.model';
 const stripe = new Stripe(config.stripe.stripe_secret_key as string);
 
 const toStripeAmount = (amount: number) => Math.round(amount * 100);
+const CHECKOUT_HOLD_MS = 5 * 60 * 1000;
+const CHECKOUT_SESSION_MAX_AGE_SECONDS = 30 * 60 + 60;
+const PLATFORM_FEE_PERCENT = 5;
+
+const getSucceededChargeInCents = async (paymentIntentId: string) => {
+  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  const chargedCents = paymentIntent.amount_received;
+  if (
+    paymentIntent.status !== 'succeeded' ||
+    paymentIntent.currency !== 'eur' ||
+    !Number.isInteger(chargedCents) ||
+    chargedCents < 1
+  ) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'Booking payment is not a succeeded EUR charge',
+    );
+  }
+  return chargedCents;
+};
+
+const splitHalfCharge = (chargedCents: number) => {
+  const transferAmountInCents = Math.floor(chargedCents / 2);
+  return {
+    refundAmountInCents: chargedCents - transferAmountInCents,
+    transferAmountInCents,
+  };
+};
+
+const salonTransferAfterPlatformFee = (chargedCents: number) => {
+  const adminFeeCents = Math.round((chargedCents * PLATFORM_FEE_PERCENT) / 100);
+  return {
+    adminFeeCents,
+    transferAmountInCents: chargedCents - adminFeeCents,
+  };
+};
 
 const createPayOnShopBooking = async (customerId: string, payload: any) => {
   const { serviceIds, date, startTime, shopId } = payload;
@@ -325,12 +367,12 @@ const createOnlineBooking = async (customerId: string, payload: any) => {
 
   console.log('Booking created with ID:', result);
 
-  const amount = totalPrice;
   const amountInCents = toStripeAmount(totalPrice);
-  const adminFee = Math.round(totalPrice * 0.05);
-  if (adminFee >= amount) {
-    throw new Error(
-      'Admin fee cannot be greater than or equal to the total amount.',
+  const { transferAmountInCents } = salonTransferAfterPlatformFee(amountInCents);
+  if (transferAmountInCents < 1) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      'Booking amount is too small to transfer to the salon.',
     );
   }
 
@@ -345,6 +387,7 @@ const createOnlineBooking = async (customerId: string, payload: any) => {
     );
   }
 
+  let checkoutSessionId: string | undefined;
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
@@ -364,14 +407,52 @@ const createOnlineBooking = async (customerId: string, payload: any) => {
         bookingId: result._id.toString(),
         paymentPurpose: ENUM_PAYMENT_PURPOSE.BOOKING,
       },
+      payment_intent_data: {
+        metadata: {
+          bookingId: result._id.toString(),
+          paymentPurpose: ENUM_PAYMENT_PURPOSE.BOOKING,
+        },
+      },
+      expires_at:
+        Math.floor(Date.now() / 1000) + CHECKOUT_SESSION_MAX_AGE_SECONDS,
       success_url: `${config.stripe.booking_payment_success_url}`,
       cancel_url: `${config.stripe.payment_cancel_url}`,
     });
+    checkoutSessionId = session.id;
 
-    console.log('Stripe checkout session created:', session);
+    const savedSession = await Booking.updateOne(
+      { _id: result._id, status: ENUM_BOOKING_STATUS.PENDING },
+      { $set: { checkoutSessionId: session.id } },
+    );
+    if (savedSession.modifiedCount === 0) {
+      await stripe.checkout.sessions.expire(session.id).catch((expireError) => {
+        console.error('Failed to expire checkout after the hold ended:', expireError);
+      });
+      throw new AppError(
+        httpStatus.CONFLICT,
+        'The booking hold ended before checkout could start',
+      );
+    }
 
     return { url: session.url };
   } catch (error: any) {
+    const removedHold = await Booking.deleteOne({
+      _id: result._id,
+      status: ENUM_BOOKING_STATUS.PENDING,
+    });
+    if (checkoutSessionId && removedHold.deletedCount > 0) {
+      await stripe.checkout.sessions
+        .expire(checkoutSessionId)
+        .catch((expireError) => {
+          console.error(
+            'Failed to expire checkout after booking creation failed:',
+            expireError,
+          );
+        });
+    }
+    if (error instanceof AppError) {
+      throw error;
+    }
     console.error('Stripe checkout session creation failed:', error);
     throw new AppError(
       httpStatus.BAD_GATEWAY,
@@ -521,6 +602,34 @@ const createCancelBookingRequest = async (
   });
 };
 
+const assertUserCanRespondToCancelRequest = (
+  userData: JwtPayload,
+  notification: { type?: string; receiver?: unknown },
+  booking: {
+    customerId?: { toString(): string };
+    shopId?: { toString(): string };
+  },
+) => {
+  const profileId = userData.profileId?.toString();
+  const isCancelRequest =
+    notification.type === NOTIFICATION_EVENT_TYPE.BOOKING_CANCEL_REQUESTED ||
+    notification.type === ENUM_NOTIFICATION_TYPE.CANCEL_BOOKING;
+  const isReceiver =
+    Boolean(profileId) && notification.receiver?.toString() === profileId;
+  const isBookingParty =
+    (userData.role === USER_ROLE.customer &&
+      booking.customerId?.toString() === profileId) ||
+    (userData.role === USER_ROLE.client &&
+      booking.shopId?.toString() === profileId);
+
+  if (!isCancelRequest || !isReceiver || !isBookingParty) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      'You are not allowed to respond to this cancellation request',
+    );
+  }
+};
+
 const changeCancelBookingRequestStatus = async (
   userData: JwtPayload,
   notificationId: string,
@@ -545,10 +654,10 @@ const acceptCancelBookingRequest = async (
     throw new AppError(httpStatus.NOT_FOUND, 'Notification not found');
   }
   const booking = await Booking.findById(notification.bookingId);
-  console.log('booking', booking);
   if (!booking) {
     throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
   }
+  assertUserCanRespondToCancelRequest(userData, notification, booking);
   const shop = await Client.findById(booking.shopId).select(
     'shopName shopImages stripAccountId _id user',
   );
@@ -560,110 +669,64 @@ const acceptCancelBookingRequest = async (
   const requestReceiver =
     userData.role === USER_ROLE.client ? booking.customerId : booking.shopId;
 
-  // refund -----------------------------------
-  if (userData?.role === USER_ROLE.customer) {
-    if (booking?.paymentType === ENUM_PAYMENT_TYPE.ONLINE) {
-      const refundAmountInCents = toStripeAmount(booking.totalPrice);
-      try {
-        await stripe.refunds.create(
-          {
-            payment_intent: booking.paymentIntentId,
-            amount: refundAmountInCents,
-          },
-          {
-            idempotencyKey: `booking-${booking._id}-customer-full-refund`,
-          },
-        );
-      } catch (error: unknown) {
-        console.error('Refund failed:', error);
-        throw new AppError(
-          httpStatus.SERVICE_UNAVAILABLE,
-          'Stripe refund failed. Please try again or contact support.',
-        );
-      }
-    }
-  } else if (userData?.role === USER_ROLE.client) {
-    const currentTime = notification?.createdAt || new Date();
-    const startTime = new Date(booking.startTime);
-    const timeDifferenceInMs = startTime.getTime() - currentTime.getTime();
-    const timeDifferenceInHours = timeDifferenceInMs / (1000 * 60 * 60);
-    let refundPercentage = 50;
-    if (timeDifferenceInHours >= 24) {
-      refundPercentage = 100;
-    }
-    if (booking?.paymentType === ENUM_PAYMENT_TYPE.ONLINE) {
-      const refundAmountInCents = toStripeAmount(
-        (booking.totalPrice * refundPercentage) / 100,
+  let refundAmountInCents = 0;
+  let transferAmountInCents = 0;
+  if (booking.paymentType === ENUM_PAYMENT_TYPE.ONLINE) {
+    if (!booking.paymentIntentId) {
+      throw new AppError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        'Salon Stripe account or booking payment is unavailable for cancellation.',
       );
-
-      try {
-        await stripe.refunds.create(
-          {
-            payment_intent: booking.paymentIntentId,
-            amount: refundAmountInCents,
-          },
-          {
-            idempotencyKey: `booking-${booking._id}-client-${refundPercentage}-refund`,
-          },
-        );
-        if (refundPercentage == 50) {
-          const transferAmountInCent = toStripeAmount(
-            (booking.totalPrice * refundPercentage) / 100,
-          );
-          try {
-            // Transfer funds
-            console.log('start tranfer');
-            const transfer: any = await stripe.transfers.create(
-              {
-                amount: transferAmountInCent,
-                currency: 'eur',
-                destination: shop?.stripAccountId as string,
-              },
-              {
-                idempotencyKey: `booking-${booking._id}-client-cancel-transfer`,
-              },
-            );
-            console.log('transfer', transfer);
-
-            // Payout to bank
-            try {
-              console.log('start payouts');
-              const payout = await stripe.payouts.create(
-                {
-                  amount: transferAmountInCent,
-                  currency: 'eur',
-                },
-                {
-                  stripeAccount: shop?.stripAccountId as string,
-                  idempotencyKey: `booking-${booking._id}-client-cancel-payout`,
-                },
-              );
-              console.log('payout', payout);
-            } catch (payoutError) {
-              console.error(
-                'Stripe payout skipped or failed (likely due to pending funds):',
-                payoutError,
-              );
-            }
-          } catch (error) {
-            console.error('Error during transfer:', error);
-            throw error;
-          }
-        }
-      } catch (error: unknown) {
-        console.error('Stripe refund/transfer failed:', error);
-        throw new AppError(
-          httpStatus.SERVICE_UNAVAILABLE,
-          'Stripe refund or transfer failed. Please try again or contact support.',
-        );
+    }
+    const chargedCents = await getSucceededChargeInCents(
+      booking.paymentIntentId,
+    );
+    if (userData.role === USER_ROLE.customer) {
+      refundAmountInCents = chargedCents;
+    } else if (userData.role === USER_ROLE.client) {
+      const currentTime = notification?.createdAt || new Date();
+      const startTime = new Date(booking.startTime);
+      const timeDifferenceInMs = startTime.getTime() - currentTime.getTime();
+      const timeDifferenceInHours = timeDifferenceInMs / (1000 * 60 * 60);
+      if (timeDifferenceInHours >= 24) {
+        refundAmountInCents = chargedCents;
+      } else {
+        const halfCharge = splitHalfCharge(chargedCents);
+        refundAmountInCents = halfCharge.refundAmountInCents;
+        transferAmountInCents = halfCharge.transferAmountInCents;
       }
     }
   }
 
-  // Update booking status to canceled and delete notification
-  await Booking.findByIdAndUpdate(booking._id, {
-    status: ENUM_BOOKING_STATUS.CANCELED,
+  if (
+    (refundAmountInCents > 0 || transferAmountInCents > 0) &&
+    (!booking.paymentIntentId ||
+      (transferAmountInCents > 0 && !shop?.stripAccountId))
+  ) {
+    throw new AppError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      'Salon Stripe account or booking payment is unavailable for cancellation.',
+    );
+  }
+
+  const financialOperation = await claimBookingFinancialOperation({
+    bookingId: booking._id,
+    type: BOOKING_FINANCIAL_OPERATION_TYPE.CANCELLATION,
+    sourcePaymentIntentId: booking.paymentIntentId,
+    destinationAccountId: shop?.stripAccountId,
+    refundAmountInCents,
+    transferAmountInCents,
+    currency: 'eur',
   });
+  await processBookingFinancialOperation(financialOperation._id.toString());
+
+  const canceledBooking = await Booking.findById(booking._id);
+  if (!canceledBooking || canceledBooking.status !== ENUM_BOOKING_STATUS.CANCELED) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'Booking status changed while accepting the cancellation request.',
+    );
+  }
   await Notification.findByIdAndDelete(notificationId);
 
   const notificationMessage =
@@ -704,6 +767,7 @@ const rejectCancelBookingRequest = async (
   if (!booking) {
     throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
   }
+  assertUserCanRespondToCancelRequest(userData, notification, booking);
   const shop = await Client.findById(booking.shopId).select(
     'shopName shopImages user',
   );
@@ -1041,11 +1105,25 @@ const markNoShow = async (shopId: string, id: string) => {
 //   return booking;
 // };
 
-const markAsComplete = async (bookingId: string) => {
+const markAsComplete = async (userData: JwtPayload, bookingId: string) => {
   let result;
+  const profileId = userData.profileId?.toString();
+  const ownerFilter =
+    profileId && userData.role === USER_ROLE.client
+      ? { shopId: profileId }
+      : profileId && userData.role === USER_ROLE.customer
+        ? { customerId: profileId }
+        : null;
+  if (!ownerFilter) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      'You are not allowed to complete this booking',
+    );
+  }
   const booking = await Booking.findOne({
     _id: bookingId,
     status: ENUM_BOOKING_STATUS.BOOKED,
+    ...ownerFilter,
   });
   if (!booking) {
     throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
@@ -1075,14 +1153,17 @@ const completePayOnShopBooking = async (
   if (!booking) {
     throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
   }
-  const result = await Booking.findByIdAndUpdate(
-    bookingId,
-    {
-      status: ENUM_BOOKING_STATUS.COMPLETED,
-      isNoShow,
-    },
+  const result = await Booking.findOneAndUpdate(
+    { _id: bookingId, status: ENUM_BOOKING_STATUS.BOOKED },
+    { $set: { status: ENUM_BOOKING_STATUS.COMPLETED, isNoShow } },
     { new: true, runValidators: true },
   );
+  if (!result) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'Booking status changed before completion.',
+    );
+  }
 
   // Pay-on-shop money only actually changes hands when the appointment is
   // completed, so the transaction log entry is created here rather than at
@@ -1130,71 +1211,112 @@ const completeStripeBooking = async (bookingId: string) => {
   if (!shop) {
     throw new AppError(httpStatus.NOT_FOUND, 'Shop not found');
   }
-  const bookingAmount = booking.totalPrice;
-  const adminFee = bookingAmount * 0.05;
-  const amountInCent = toStripeAmount(bookingAmount - adminFee);
-  const readiness = await getStripeAccountReadiness(shop.stripAccountId);
-  if (!readiness.ready) {
-    throw new AppError(httpStatus.BAD_REQUEST, readiness.message);
-  }
-  try {
-    // Transfer funds
-    const transfer: any = await stripe.transfers.create(
-      {
-        amount: amountInCent,
-        currency: 'eur',
-        destination: shop.stripAccountId as string,
-      },
-      {
-        idempotencyKey: `booking-${bookingId}-completion-transfer`,
-      },
+  if (!shop.stripAccountId || !booking.paymentIntentId) {
+    throw new AppError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      'Salon Stripe account or booking payment is unavailable for transfer.',
     );
-    console.log('transfer', transfer);
-
-    // Payout to bank
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const payout = await stripe.payouts.create(
-        {
-          amount: amountInCent,
-          currency: 'eur',
-        },
-        {
-          stripeAccount: shop.stripAccountId as string,
-          idempotencyKey: `booking-${bookingId}-completion-payout`,
-        },
-      );
-    } catch (payoutError) {
-      console.error(
-        'Stripe payout skipped or failed (likely due to pending funds):',
-        payoutError,
-      );
-    }
-
-    // Update booking data
-    const result = await Booking.findByIdAndUpdate(
-      bookingId,
-      { status: ENUM_BOOKING_STATUS.COMPLETED },
-      { new: true, runValidators: true },
-    );
-    return result;
-  } catch (error) {
-    console.error('Error during transfer:', error);
-    throw error;
   }
+  const chargedCents = await getSucceededChargeInCents(booking.paymentIntentId);
+  const { transferAmountInCents } = salonTransferAfterPlatformFee(chargedCents);
+  if (transferAmountInCents < 1) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      'Booking amount is too small to transfer to the salon.',
+    );
+  }
+
+  const financialOperation = await claimBookingFinancialOperation({
+    bookingId: booking._id,
+    type: BOOKING_FINANCIAL_OPERATION_TYPE.COMPLETION,
+    sourcePaymentIntentId: booking.paymentIntentId,
+    destinationAccountId: shop.stripAccountId,
+    refundAmountInCents: 0,
+    transferAmountInCents,
+    currency: 'eur',
+  });
+  await processBookingFinancialOperation(financialOperation._id.toString());
+  const completedBooking = await Booking.findOne({
+    _id: bookingId,
+    status: ENUM_BOOKING_STATUS.COMPLETED,
+  });
+  if (!completedBooking) {
+    throw new AppError(httpStatus.CONFLICT, 'Booking status has changed');
+  }
+
+  return completedBooking;
 };
 
-// crone job-----------------------------------
-cron.schedule('*/10 * * * *', async () => {
+const releaseUnpaidPendingBooking = async (booking: {
+  _id: { toString(): string };
+  checkoutSessionId?: string;
+}) => {
+  if (booking.checkoutSessionId) {
+    let session = await stripe.checkout.sessions.retrieve(
+      booking.checkoutSessionId,
+    );
+    if (session.payment_status === 'paid') {
+      return;
+    }
+    if (session.status === 'open') {
+      try {
+        session = await stripe.checkout.sessions.expire(
+          booking.checkoutSessionId,
+        );
+      } catch (error) {
+        session = await stripe.checkout.sessions.retrieve(
+          booking.checkoutSessionId,
+        );
+        if (session.payment_status === 'paid') {
+          return;
+        }
+        if (session.status === 'open') {
+          throw error;
+        }
+      }
+    }
+    if (session.payment_status === 'paid') {
+      return;
+    }
+  }
+
+  await Booking.deleteOne({
+    _id: booking._id,
+    status: ENUM_BOOKING_STATUS.PENDING,
+  });
+};
+
+// Unpaid online holds block the staff slot for 5 minutes. Close Checkout
+// before deleting the booking so a later payment cannot capture money.
+let isReleasingUnpaidBookings = false;
+cron.schedule('* * * * *', async () => {
+  if (isReleasingUnpaidBookings) {
+    return;
+  }
+  isReleasingUnpaidBookings = true;
   try {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const result = await Booking.deleteMany({
+    const holdCutoff = new Date(Date.now() - CHECKOUT_HOLD_MS);
+    const staleBookings = await Booking.find({
       status: ENUM_BOOKING_STATUS.PENDING,
-      createdAt: { $lte: fiveMinutesAgo },
-    });
-    console.log(`Deleted ${result.deletedCount} pending bookings`);
+      createdAt: { $lte: holdCutoff },
+    })
+      .select('_id checkoutSessionId')
+      .limit(50);
+
+    for (const booking of staleBookings) {
+      try {
+        await releaseUnpaidPendingBooking(booking);
+      } catch (error) {
+        console.error(
+          `Failed to release unpaid booking ${booking._id}:`,
+          error,
+        );
+      }
+    }
   } catch (error) {
-    console.error('Error running cron job:', error);
+    console.error('Error releasing unpaid bookings:', error);
+  } finally {
+    isReleasingUnpaidBookings = false;
   }
 });
 

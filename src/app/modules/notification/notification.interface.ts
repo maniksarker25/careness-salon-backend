@@ -24,6 +24,7 @@ export interface INotification {
   };
 
   bookingId?: Types.ObjectId;
+  dedupeKey?: string;
   rescheduleDateTime?: Date;
 
   isRead: boolean;

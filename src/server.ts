@@ -10,6 +10,10 @@ import seedSuperAdmin from './app/DB';
 import { errorLogger, logger } from './app/shared/logger';
 import { initializeSocket } from './app/socket/socketManager';
 import './app/modules/notification/notification.listener';
+import BookingTransfer from './app/modules/booking/bookingTransfer.model';
+import BookingFinancialOperation from './app/modules/booking/bookingFinancialOperation.model';
+import Notification from './app/modules/notification/notification.model';
+import StripeWebhookEvent from './app/modules/stripe/stripeWebhookEvent.model';
 
 let myServer: HTTPServer | undefined;
 
@@ -17,6 +21,13 @@ async function main() {
   try {
     await mongoose.connect(config.database_url as string);
     logger.info('DB Connected Successfully');
+    await Promise.all([
+      BookingTransfer.createIndexes(),
+      BookingFinancialOperation.createIndexes(),
+      Notification.createIndexes(),
+      StripeWebhookEvent.createIndexes(),
+    ]);
+    logger.info('Booking transfer and notification indexes are ready');
 
     const port =
       typeof config.port === 'number' ? config.port : Number(config.port);

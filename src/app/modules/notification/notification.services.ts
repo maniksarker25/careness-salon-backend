@@ -111,9 +111,10 @@ const sendNotification = async ({
   meta = {},
   image,
   bookingId,
+  dedupeKey,
   rescheduleDateTime,
 }: any) => {
-  const notification = await Notification.create({
+  const notificationData = {
     receiver,
     title,
     message,
@@ -127,7 +128,15 @@ const sendNotification = async ({
       entityId,
       meta,
     },
-  });
+    ...(dedupeKey ? { dedupeKey } : {}),
+  };
+  const notification = dedupeKey
+    ? await Notification.findOneAndUpdate(
+        { dedupeKey },
+        { $setOnInsert: notificationData },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      )
+    : await Notification.create(notificationData);
 
   console.log(`Notification created for ${receiver}: ${title} - ${message}`);
 

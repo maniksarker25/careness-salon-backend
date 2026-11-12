@@ -3,6 +3,16 @@ import catchAsync from '../../utilities/catchasync';
 import BookingService from './booking.service';
 import sendResponse from '../../utilities/sendResponse';
 import { USER_ROLE } from '../user/user.constant';
+import {
+  getBookingTransfersNeedingAttention,
+  reconcileBookingTransfer,
+  retryFailedBookingTransfer,
+} from './bookingTransfer.service';
+import {
+  getFinancialOperationsNeedingAttention,
+  reconcileFinancialOperation,
+  retryFinancialOperation,
+} from './bookingFinancialOperation.service';
 
 const createBooking = catchAsync(async (req, res) => {
 
@@ -118,7 +128,7 @@ const markNoShow = catchAsync(async (req, res) => {
 });
 
 const markAsComplete = catchAsync(async (req, res) => {
-  const result = await BookingService.markAsComplete(req.params.id);
+  const result = await BookingService.markAsComplete(req.user, req.params.id);
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -136,6 +146,74 @@ const getSingleBooking = catchAsync(async (req, res) => {
   });
 });
 
+const getBookingTransferFailures = catchAsync(async (_req, res) => {
+  const result = await getBookingTransfersNeedingAttention();
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Booking transfers requiring attention retrieved successfully',
+    data: result,
+  });
+});
+
+const retryBookingTransfer = catchAsync(async (req, res) => {
+  const result = await retryFailedBookingTransfer(req.params.transferId);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Booking transfer retry scheduled',
+    data: result,
+  });
+});
+
+const reconcileBookingTransferStatus = catchAsync(async (req, res) => {
+  const result = await reconcileBookingTransfer(
+    req.params.transferId,
+    req.body?.noMatchingTransfer === true,
+  );
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: result.reconciled
+      ? 'Booking transfer reconciled successfully'
+      : 'No matching Stripe transfer was found; manual review is still required',
+    data: result,
+  });
+});
+
+const getFinancialOperationsForAdmin = catchAsync(async (_req, res) => {
+  const result = await getFinancialOperationsNeedingAttention();
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Financial operations requiring attention retrieved successfully',
+    data: result,
+  });
+});
+
+const retryFinancialOperationForAdmin = catchAsync(async (req, res) => {
+  const result = await retryFinancialOperation(req.params.operationId);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Financial operation retry scheduled',
+    data: result,
+  });
+});
+
+const reconcileFinancialOperationForAdmin = catchAsync(async (req, res) => {
+  const result = await reconcileFinancialOperation(req.params.operationId, {
+    noMatchingRefund: req.body?.noMatchingRefund === true,
+    noMatchingTransfer: req.body?.noMatchingTransfer === true,
+  });
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Financial operation reconciliation completed',
+    data: result,
+  });
+});
+
 const BookingController = {
   createBooking,
   getCustomerBookings,
@@ -147,6 +225,12 @@ const BookingController = {
   markNoShow,
   markAsComplete,
   getSingleBooking,
+  getBookingTransferFailures,
+  retryBookingTransfer,
+  reconcileBookingTransferStatus,
+  getFinancialOperationsForAdmin,
+  retryFinancialOperationForAdmin,
+  reconcileFinancialOperationForAdmin,
 };
 
 export default BookingController;

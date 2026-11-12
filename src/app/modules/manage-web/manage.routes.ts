@@ -59,7 +59,11 @@ router.get(
 
   ManageController.getContactUs,
 );
-router.patch('/edit-privacy-policy/:id', ManageController.editPrivacyPolicy);
+router.patch(
+  '/edit-privacy-policy/:id',
+  auth(USER_ROLE.superAdmin, USER_ROLE.admin),
+  ManageController.editPrivacyPolicy,
+);
 router.patch(
   '/edit-slider/:id',
   auth(USER_ROLE.superAdmin),

@@ -1,12 +1,14 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import httpStatus from 'http-status';
 import { JwtPayload } from 'jsonwebtoken';
+import mongoose from 'mongoose';
 import { appEventEmitter } from '../../events/eventEmitter';
 import AppError from '../../error/appError';
 import { ENUM_NOTIFICATION_TYPE } from '../../utilities/enum';
 import Booking from '../booking/booking.model';
 import Client from '../client/client.model';
 import Customer from '../customer/customer.model';
+import { ENUM_NOTIFICATION_TYPE as NOTIFICATION_EVENT_TYPE } from '../notification/notification.enum';
 import Notification from '../notification/notification.model';
 import { USER_ROLE } from '../user/user.constant';
 import { ENUM_BOOKING_STATUS } from '../../utilities/enum';
@@ -19,21 +21,63 @@ import {
 import { assertWithinBusinessHours } from '../bussinessHour/businessHour.utils';
 import { IBookingReschedule } from './booking_reschedule.interface';
 
+const assertUserCanRespondToRescheduleRequest = (
+  userData: JwtPayload,
+  notification: { type?: string; receiver?: unknown },
+  booking: {
+    customerId?: { toString(): string };
+    shopId?: { toString(): string };
+  },
+) => {
+  const profileId = userData.profileId?.toString();
+  const isRescheduleRequest =
+    notification.type === NOTIFICATION_EVENT_TYPE.BOOKING_RESCHEDULE_REQUESTED ||
+    notification.type === ENUM_NOTIFICATION_TYPE.RESCHEDULE_BOOKING;
+  const isReceiver =
+    Boolean(profileId) && notification.receiver?.toString() === profileId;
+  const isBookingParty =
+    (userData.role === USER_ROLE.customer &&
+      booking.customerId?.toString() === profileId) ||
+    (userData.role === USER_ROLE.client &&
+      booking.shopId?.toString() === profileId);
+
+  if (!isRescheduleRequest || !isReceiver || !isBookingParty) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      'You are not allowed to respond to this reschedule request',
+    );
+  }
+};
+
 const createRescheduleRequest = async (
   userData: JwtPayload,
   payload: IBookingReschedule,
 ) => {
-  const booking = await Booking.findById(payload.bookingId);
+  const profileId = userData.profileId?.toString();
+  const ownerFilter =
+    profileId && userData.role === USER_ROLE.client
+      ? { shopId: profileId }
+      : profileId && userData.role === USER_ROLE.customer
+        ? { customerId: profileId }
+        : null;
+  if (!ownerFilter) {
+    throw new AppError(
+      httpStatus.FORBIDDEN,
+      'You are not allowed to reschedule this booking',
+    );
+  }
+  const booking = await Booking.findOne({
+    _id: payload.bookingId,
+    status: ENUM_BOOKING_STATUS.BOOKED,
+    ...ownerFilter,
+  });
   if (!booking) {
-    throw new AppError(httpStatus.BAD_REQUEST, 'Booking not found');
+    throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
   }
   const shop = await Client.findById(booking.shopId).select(
     'shopName shopImages user',
   );
   const customer = await Customer.findById(booking.customerId);
-  if (!booking) {
-    throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
-  }
   const startDate = toSalonDateTime(
     payload.rescheduleDate,
     payload.rescheduleTime,
@@ -139,6 +183,16 @@ const acceptRescheduleRequest = async (
   if (!booking) {
     throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
   }
+  assertUserCanRespondToRescheduleRequest(userData, notification, booking);
+  if (booking.status !== ENUM_BOOKING_STATUS.BOOKED) {
+    throw new AppError(
+      httpStatus.CONFLICT,
+      'Only a booked appointment can be rescheduled',
+    );
+  }
+  if (!notification.rescheduleDateTime) {
+    throw new AppError(httpStatus.BAD_REQUEST, 'Reschedule time is missing');
+  }
   const shop = await Client.findById(booking.shopId).select(
     'shopName shopImages user',
   );
@@ -160,11 +214,49 @@ const acceptRescheduleRequest = async (
     endDate,
   });
 
-  await Booking.findByIdAndUpdate(booking._id, {
-    startTime: notification.rescheduleDateTime,
-    endTime: endDate,
-  });
-  await Notification.findByIdAndDelete(notificationId);
+  const session = await mongoose.startSession();
+  try {
+    session.startTransaction();
+    const conflictingBooking = await Booking.findOne({
+      _id: { $ne: booking._id },
+      staffId: booking.staffId,
+      status: {
+        $in: [ENUM_BOOKING_STATUS.PENDING, ENUM_BOOKING_STATUS.BOOKED],
+      },
+      startTime: { $lt: endDate },
+      endTime: { $gt: notification.rescheduleDateTime },
+    }).session(session);
+    if (conflictingBooking) {
+      throw new AppError(
+        httpStatus.CONFLICT,
+        'The selected time slot is conflict with other booking. Please choose a different time',
+      );
+    }
+
+    const updatedBooking = await Booking.findOneAndUpdate(
+      { _id: booking._id, status: ENUM_BOOKING_STATUS.BOOKED },
+      {
+        $set: {
+          startTime: notification.rescheduleDateTime,
+          endTime: endDate,
+        },
+      },
+      { new: true, session },
+    );
+    if (!updatedBooking) {
+      throw new AppError(
+        httpStatus.CONFLICT,
+        'Booking status changed before the reschedule was accepted.',
+      );
+    }
+    await Notification.findByIdAndDelete(notificationId).session(session);
+    await session.commitTransaction();
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
   const requestReceiver =
     userData.role === USER_ROLE.client ? booking.customerId : booking.shopId;
   const notificationMessage =
@@ -205,6 +297,7 @@ const rejectRescheduleRequest = async (
   if (!booking) {
     throw new AppError(httpStatus.NOT_FOUND, 'Booking not found');
   }
+  assertUserCanRespondToRescheduleRequest(userData, notification, booking);
   const shop = await Client.findById(booking.shopId).select(
     'shopName shopImages',
   );

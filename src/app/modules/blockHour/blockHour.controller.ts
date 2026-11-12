@@ -4,7 +4,10 @@ import sendResponse from "../../utilities/sendResponse";
 import BlockHourService from "./blockHour.services";
 
 const addBlockHour = catchAsync(async (req, res) => {
-    const result = await BlockHourService.addBlockHour(req.body);
+    const result = await BlockHourService.addBlockHour(
+      req.user.profileId,
+      req.body,
+    );
      sendResponse(res, {
        statusCode: httpStatus.OK,
        success: true,
@@ -13,7 +16,11 @@ const addBlockHour = catchAsync(async (req, res) => {
      });
    });
    const updateBlockHour  = catchAsync(async(req,res)=>{
-    const result = await BlockHourService.updateBusinessHour(req.params.id,req.body);
+    const result = await BlockHourService.updateBusinessHour(
+      req.user.profileId,
+      req.params.id,
+      req.body,
+    );
     sendResponse(res, {
       statusCode: httpStatus.OK,
       success: true,
@@ -23,7 +30,10 @@ const addBlockHour = catchAsync(async (req, res) => {
   })
 
 const deleteBlockHour = catchAsync(async(req,res)=>{
-    const result = await BlockHourService.deleteBlockHour(req.params.id);
+    const result = await BlockHourService.deleteBlockHour(
+      req.user.profileId,
+      req.params.id,
+    );
     sendResponse(res, {
         statusCode: httpStatus.OK,
         success: true,

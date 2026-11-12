@@ -24,7 +24,11 @@ router.patch(
   validateRequest(customerValidations.updateCustomerProfileValidationSchema),
   customerController.updateCustomerProfile,
 );
-router.get('/get-all', customerController.getAllCustomer);
+router.get(
+  '/get-all',
+  auth(USER_ROLE.superAdmin, USER_ROLE.admin),
+  customerController.getAllCustomer,
+);
 router.post(
   '/complete-profile',
   authWithoutActive(USER_ROLE.customer),

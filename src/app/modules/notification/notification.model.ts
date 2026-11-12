@@ -43,6 +43,12 @@ const notificationSchema = new Schema(
       ref: 'Booking',
     },
 
+    dedupeKey: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+
     rescheduleDateTime: {
       type: Date,
     },

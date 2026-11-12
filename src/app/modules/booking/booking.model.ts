@@ -57,6 +57,9 @@ const BookingSchema = new Schema<IBooking>(
     paymentIntentId: {
       type: String,
     },
+    checkoutSessionId: {
+      type: String,
+    },
     // set when staff marks the customer as a no-show; pay-on-shop no-shows
     // never collect payment, so they must not count as revenue
     isNoShow: { type: Boolean, default: false },

@@ -58,5 +58,35 @@ router.get(
   auth(USER_ROLE.customer, USER_ROLE.client),
   BookingController.getSingleBooking,
 );
+router.get(
+  '/admin/transfer-failures',
+  auth(USER_ROLE.admin, USER_ROLE.superAdmin),
+  BookingController.getBookingTransferFailures,
+);
+router.post(
+  '/admin/transfers/:transferId/retry',
+  auth(USER_ROLE.admin, USER_ROLE.superAdmin),
+  BookingController.retryBookingTransfer,
+);
+router.post(
+  '/admin/transfers/:transferId/reconcile',
+  auth(USER_ROLE.admin, USER_ROLE.superAdmin),
+  BookingController.reconcileBookingTransferStatus,
+);
+router.get(
+  '/admin/financial-operations',
+  auth(USER_ROLE.admin, USER_ROLE.superAdmin),
+  BookingController.getFinancialOperationsForAdmin,
+);
+router.post(
+  '/admin/financial-operations/:operationId/retry',
+  auth(USER_ROLE.admin, USER_ROLE.superAdmin),
+  BookingController.retryFinancialOperationForAdmin,
+);
+router.post(
+  '/admin/financial-operations/:operationId/reconcile',
+  auth(USER_ROLE.admin, USER_ROLE.superAdmin),
+  BookingController.reconcileFinancialOperationForAdmin,
+);
 
 export const bookingRoutes = router;

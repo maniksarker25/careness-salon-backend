@@ -79,26 +79,37 @@ const getAllService = async (query: Record<string, any>) => {
   };
 };
 
-const updateService = async (id: string, payload: Partial<IService>) => {
-  if (payload.category) {
-    const isCategoryExist = await Category.findById(payload.category);
-    if (!isCategoryExist) {
-      throw new AppError(httpStatus.NOT_FOUND, 'Category not exits');
+const updateService = async (
+  shopId: string,
+  id: string,
+  payload: Partial<IService>,
+) => {
+  const { shop: _shop, shopCategory: _shopCategory, ...update } = payload;
+  if (update.category) {
+    const category = await Category.findOne({
+      _id: update.category,
+      shop: shopId,
+    });
+    if (!category) {
+      throw new AppError(httpStatus.NOT_FOUND, 'Category not found');
     }
   }
-  const service = await Service.findById(id);
-  if (!service) {
+  const result = await Service.findOneAndUpdate(
+    { _id: id, shop: shopId },
+    update,
+    { new: true, runValidators: true },
+  );
+  if (!result) {
     throw new AppError(httpStatus.NOT_FOUND, 'Service not found');
   }
-  const result = await Service.findByIdAndUpdate(id, payload, {
-    new: true,
-    runValidators: true,
-  });
   return result;
 };
 
-const deleteService = async (id: string) => {
-  const result = await Service.findByIdAndDelete(id);
+const deleteService = async (shopId: string, id: string) => {
+  const result = await Service.findOneAndDelete({ _id: id, shop: shopId });
+  if (!result) {
+    throw new AppError(httpStatus.NOT_FOUND, 'Service not found');
+  }
   return result;
 };
 

@@ -28,6 +28,7 @@ export interface IBooking {
   paymentType: (typeof ENUM_PAYMENT_TYPE)[keyof typeof ENUM_PAYMENT_TYPE];
   shopCategoryId: Types.ObjectId;
   paymentIntentId: string;
+  checkoutSessionId?: string;
   isNoShow?: boolean;
   note: string;
 }

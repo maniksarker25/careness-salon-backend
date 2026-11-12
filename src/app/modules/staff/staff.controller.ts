@@ -26,7 +26,11 @@ const updateStaff = catchAsync(async (req, res) => {
     req.body.profile_image = files['profile_image'][0].path;
   }
 
-  const result = await StaffServices.updateStaffIntoDB(req.params.id, req.body);
+  const result = await StaffServices.updateStaffIntoDB(
+    req.user.profileId,
+    req.params.id,
+    req.body,
+  );
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
@@ -36,7 +40,10 @@ const updateStaff = catchAsync(async (req, res) => {
 });
 // delete staff
 const deleteStaff = catchAsync(async (req, res) => {
-  const result = await StaffServices.deleteStaffFromDB(req.params.id);
+  const result = await StaffServices.deleteStaffFromDB(
+    req.user.profileId,
+    req.params.id,
+  );
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
