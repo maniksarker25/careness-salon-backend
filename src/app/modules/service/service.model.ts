@@ -24,6 +24,8 @@ const ServiceSchema: Schema<IService> = new Schema(
   },
 );
 
+ServiceSchema.index({ category: 1 });
+
 const Service = model<IService>('Service', ServiceSchema);
 
 export default Service;

@@ -33,6 +33,8 @@ const subCategorySchema: Schema = new Schema<ISubCategory>({
   },
 });
 
+CategorySchema.index({ shop: 1 });
+
 const Category = model<ICategory>('Category', CategorySchema);
 export const SubCategory = model<ISubCategory>(
   'SubCategory',

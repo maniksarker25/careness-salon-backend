@@ -231,11 +231,9 @@ const getNearbyShopWithTime = async (
 ) => {
   const pipeline: any[] = [];
 
-  // ✅ Validate customerId
   const isValidCustomerId =
     customerId && mongoose.Types.ObjectId.isValid(customerId);
 
-  // ✅ GEO (must be first)
   if (query.latitude && query.longitude) {
     pipeline.push({
       $geoNear: {
@@ -253,7 +251,6 @@ const getNearbyShopWithTime = async (
     });
   }
 
-  // ✅ Filters
   const matchStage: any = {
     status: 'active',
   };
@@ -274,7 +271,6 @@ const getNearbyShopWithTime = async (
 
   pipeline.push({ $match: matchStage });
 
-  // ✅ Estimated Time
   pipeline.push({
     $addFields: {
       estimatedTime: {
@@ -287,7 +283,6 @@ const getNearbyShopWithTime = async (
     },
   });
 
-  // ✅ Top Rated
   if (query.topRated) {
     pipeline.push({
       $addFields: {
@@ -305,13 +300,11 @@ const getNearbyShopWithTime = async (
       $sort: { ratingRatio: -1 },
     });
   } else if (query.latitude && query.longitude) {
-    // ✅ default sort by distance
     pipeline.push({
       $sort: { distance: 1 },
     });
   }
 
-  // ✅ Bookmark logic (ONLY if logged in)
   if (isValidCustomerId) {
     pipeline.push({
       $lookup: {
@@ -344,7 +337,6 @@ const getNearbyShopWithTime = async (
       },
     });
   } else {
-    // ✅ Not logged in
     pipeline.push({
       $addFields: {
         isBookmark: false,
@@ -352,7 +344,6 @@ const getNearbyShopWithTime = async (
     });
   }
 
-  // ✅ Final projection
   pipeline.push({
     $project: {
       shopName: 1,
@@ -396,70 +387,85 @@ const getSingleShop = async (id: string) => {
   const currentDay = getCurrentDay();
   const now = new Date();
 
-  // Fetch business hours for the current day
-  const businessHour = await BusinessHour.findOne({
-    entityId: id,
-    entityType: 'Shop',
-    day: currentDay,
-  }).select('day openTime closeTime isClosed');
-
-  // Find the client/shop by ID and populate the shopCategoryId
-  const shop = await Client.findById(id)
-    .populate('shopCategoryId')
-    .select(
-      'shopImages shopName location totalRating totalRatingCount _id shopGenderCategory user',
-    );
+  const [businessHour, shop] = await Promise.all([
+    BusinessHour.findOne({
+      entityId: id,
+      entityType: 'Shop',
+      day: currentDay,
+    }).select('day openTime closeTime isClosed'),
+    Client.findById(id)
+      .populate('shopCategoryId')
+      .select(
+        'shopImages shopName address location totalRating totalRatingCount _id shopGenderCategory user',
+      ),
+  ]);
 
   // Check if the shop was found
   if (!shop) {
     throw new AppError(httpStatus.NOT_FOUND, 'Shop not found');
   }
 
-  // Fetch categories related to the shop's ID
-  const categories = await Category.find({ shop: shop._id })
-    .select('categoryName appointmentColor')
-    .exec();
-
-  // Check for an active discount
-  const discount = await Discount.findOne({
-    shop: id,
-    discountStartDate: { $lte: now },
-    discountEndDate: { $gte: now },
-  });
+  const [categories, discount] = await Promise.all([
+    Category.find({ shop: shop._id })
+      .select('categoryName appointmentColor')
+      .exec(),
+    Discount.findOne({
+      shop: id,
+      discountStartDate: { $lte: now },
+      discountEndDate: { $gte: now },
+    }),
+  ]);
 
   const isAllServicesDiscounted = discount?.services === 'all-services';
-  const categoriesWithServices = await Promise.all(
-    categories.map(async (category) => {
-      const services = await Service.find({ category: category._id })
-        .select('serviceName availableFor durationMinutes price')
-        .exec();
-      const servicesWithDiscount = services.map((service) => {
-        const isServiceDiscounted =
-          isAllServicesDiscounted ||
-          (discount?.services instanceof Array &&
-            discount.services.some(
-              (id: any) => id.toString() === service._id.toString(),
-            ));
-
-        if (isServiceDiscounted) {
-          const discountAmount =
-            service.price * (discount.discountPercentage / 100);
-          const discountPrice = service.price - discountAmount;
-          return {
-            ...service.toObject(),
-            discountPrice: discountPrice,
-          };
-        }
-
-        return service.toObject();
-      });
-
-      return {
-        ...category.toObject(),
-        services: servicesWithDiscount,
-      };
-    }),
+  const discountedServiceIds = new Set(
+    discount?.services instanceof Array
+      ? discount.services.map((serviceId) => serviceId.toString())
+      : [],
   );
+  const services = categories.length
+    ? await Service.find({
+        category: { $in: categories.map((category) => category._id) },
+      })
+        .select('category serviceName availableFor durationMinutes price')
+        .exec()
+    : [];
+  const servicesByCategory = new Map<string, typeof services>();
+
+  services.forEach((service) => {
+    const categoryId = service.category.toString();
+    const categoryServices = servicesByCategory.get(categoryId) || [];
+    categoryServices.push(service);
+    servicesByCategory.set(categoryId, categoryServices);
+  });
+
+  const categoriesWithServices = categories.map((category) => {
+    const categoryServices =
+      servicesByCategory.get(category._id.toString()) || [];
+    const servicesWithDiscount = categoryServices.map((service) => {
+      const serviceData = service.toObject();
+      delete serviceData.category;
+      const isServiceDiscounted =
+        isAllServicesDiscounted ||
+        discountedServiceIds.has(service._id.toString());
+
+      if (isServiceDiscounted) {
+        const discountAmount =
+          service.price * (discount!.discountPercentage / 100);
+        const discountPrice = service.price - discountAmount;
+        return {
+          ...serviceData,
+          discountPrice,
+        };
+      }
+
+      return serviceData;
+    });
+
+    return {
+      ...category.toObject(),
+      services: servicesWithDiscount,
+    };
+  });
 
   // Format the response as required
   return {

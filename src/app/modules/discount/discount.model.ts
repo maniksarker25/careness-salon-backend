@@ -125,6 +125,8 @@ const DiscountSchema: Schema = new Schema<IDiscount>(
   },
 );
 
+DiscountSchema.index({ shop: 1, discountStartDate: 1, discountEndDate: 1 });
+
 const Discount = model<IDiscount>('Discount', DiscountSchema);
 
 export default Discount;
