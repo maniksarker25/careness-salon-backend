@@ -239,6 +239,7 @@ const acceptRescheduleRequest = async (
         $set: {
           startTime: notification.rescheduleDateTime,
           endTime: endDate,
+          slotHeld: true,
         },
       },
       { new: true, session },
@@ -253,6 +254,15 @@ const acceptRescheduleRequest = async (
     await session.commitTransaction();
   } catch (error) {
     await session.abortTransaction();
+    const code =
+      (error as { code?: number; cause?: { code?: number } })?.code ??
+      (error as { cause?: { code?: number } })?.cause?.code;
+    if (code === 11000) {
+      throw new AppError(
+        httpStatus.CONFLICT,
+        'The selected time slot is conflict with other booking. Please choose a different time',
+      );
+    }
     throw error;
   } finally {
     session.endSession();

@@ -26,7 +26,7 @@ const loginUserIntoDB = async (payload: TLoginUser) => {
   console.log('loginPayload', payload);
   const user = await User.findOne({ email: payload.email });
   if (!user) {
-    throw new AppError(httpStatus.NOT_FOUND, 'This user does not exist');
+    throw new AppError(httpStatus.NOT_FOUND, 'Invalid Credentials');
   }
   if (user.isDeleted) {
     throw new AppError(httpStatus.FORBIDDEN, 'This user is already deleted');

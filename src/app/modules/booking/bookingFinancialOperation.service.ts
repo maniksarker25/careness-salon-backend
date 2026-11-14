@@ -139,7 +139,7 @@ export const claimBookingFinancialOperation = async (
       : 'canceled';
   const booking = await Booking.findOneAndUpdate(
     { _id: input.bookingId, status: 'booked' },
-    { $set: { status: targetStatus } },
+    { $set: { status: targetStatus, slotHeld: false } },
     { new: true, runValidators: true },
   );
   if (!booking) {
@@ -371,7 +371,7 @@ const processFinancialOperation = async (operationId: string) => {
         : 'canceled';
     const booking = await Booking.findOneAndUpdate(
       { _id: operation.bookingId, status: 'booked' },
-      { $set: { status: targetStatus } },
+      { $set: { status: targetStatus, slotHeld: false } },
       { new: true },
     );
     if (!booking) {

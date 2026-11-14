@@ -30,5 +30,6 @@ export interface IBooking {
   paymentIntentId: string;
   checkoutSessionId?: string;
   isNoShow?: boolean;
+  slotHeld?: boolean;
   note: string;
 }

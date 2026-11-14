@@ -58,6 +58,84 @@ const toStripeAmount = (amount: number) => Math.round(amount * 100);
 const CHECKOUT_HOLD_MS = 5 * 60 * 1000;
 const CHECKOUT_SESSION_MAX_AGE_SECONDS = 30 * 60 + 60;
 const PLATFORM_FEE_PERCENT = 5;
+const ACTIVE_BOOKING_STATUSES = [
+  ENUM_BOOKING_STATUS.PENDING,
+  ENUM_BOOKING_STATUS.BOOKED,
+];
+const SLOT_TAKEN_MESSAGE =
+  'The selected time slot is conflict with other booking. Please choose a different time.';
+
+const slotTakenError = () =>
+  new AppError(httpStatus.CONFLICT, SLOT_TAKEN_MESSAGE);
+
+const isDuplicateKeyError = (error: unknown) => {
+  const candidate = error as { code?: number; cause?: { code?: number } };
+  return candidate?.code === 11000 || candidate?.cause?.code === 11000;
+};
+
+const isSameCustomer = (
+  bookingCustomerId: { toString(): string } | null | undefined,
+  customerId: string,
+) =>
+  Boolean(
+    customerId &&
+      bookingCustomerId &&
+      bookingCustomerId.toString() === customerId.toString(),
+  );
+
+const isSameStart = (left: Date, right: Date) =>
+  new Date(left).getTime() === new Date(right).getTime();
+
+// Insert, then drop this row if an earlier active booking already overlaps it.
+// A second request for the same customer and start time gets the first row back.
+const claimBookingSlot = async (doc: Record<string, unknown>, customerId: string) => {
+  let createdBooking;
+  try {
+    createdBooking = await Booking.create(doc);
+  } catch (error) {
+    if (!isDuplicateKeyError(error)) {
+      throw error;
+    }
+    const existing = await Booking.findOne({
+      staffId: doc.staffId,
+      startTime: doc.startTime,
+      status: { $in: ACTIVE_BOOKING_STATUSES },
+    });
+    if (
+      existing &&
+      isSameCustomer(existing.customerId, customerId) &&
+      existing.paymentType === doc.paymentType
+    ) {
+      return { booking: existing, created: false };
+    }
+    throw slotTakenError();
+  }
+
+  const earlierOverlap = await Booking.findOne({
+    _id: { $lt: createdBooking._id },
+    staffId: createdBooking.staffId,
+    startTime: { $lt: createdBooking.endTime },
+    endTime: { $gt: createdBooking.startTime },
+    status: { $in: ACTIVE_BOOKING_STATUSES },
+  });
+  if (!earlierOverlap) {
+    return { booking: createdBooking, created: true };
+  }
+
+  await Booking.deleteOne({
+    _id: createdBooking._id,
+    status: { $in: ACTIVE_BOOKING_STATUSES },
+  });
+
+  if (
+    isSameCustomer(earlierOverlap.customerId, customerId) &&
+    isSameStart(earlierOverlap.startTime, createdBooking.startTime) &&
+    earlierOverlap.paymentType === createdBooking.paymentType
+  ) {
+    return { booking: earlierOverlap, created: false };
+  }
+  throw slotTakenError();
+};
 
 const getSucceededChargeInCents = async (paymentIntentId: string) => {
   const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
@@ -159,15 +237,23 @@ const createPayOnShopBooking = async (customerId: string, payload: any) => {
   // Check for conflicting bookings
   const existingBookings = await Booking.find({
     staffId: payload.staffId,
-    $and: [{ startTime: { $lt: endDate }, endTime: { $gt: startDate } }],
-    status: { $in: [ENUM_BOOKING_STATUS.PENDING, ENUM_BOOKING_STATUS.BOOKED] },
+    startTime: { $lt: endDate },
+    endTime: { $gt: startDate },
+    status: { $in: ACTIVE_BOOKING_STATUSES },
   });
 
+  const ownExactBooking = existingBookings.find(
+    (booking) =>
+      booking.paymentType === ENUM_PAYMENT_TYPE.PAY_ON_SHOP &&
+      isSameCustomer(booking.customerId, customerId) &&
+      isSameStart(booking.startTime, startDate),
+  );
+  if (ownExactBooking) {
+    return ownExactBooking;
+  }
+
   if (existingBookings.length > 0) {
-    throw new AppError(
-      httpStatus.CONFLICT,
-      'The selected time slot is conflict with other booking. Please choose a different time.',
-    );
+    throw slotTakenError();
   }
 
   // Fetch blocked hours for the staff and shop
@@ -202,17 +288,25 @@ const createPayOnShopBooking = async (customerId: string, payload: any) => {
     );
   }
 
-  const result = await Booking.create({
-    ...payload,
-    shopCategoryId: shop.shopCategoryId,
-    startTime: startDate,
-    endTime: endDate,
+  const { booking: result, created } = await claimBookingSlot(
+    {
+      ...payload,
+      shopCategoryId: shop.shopCategoryId,
+      startTime: startDate,
+      endTime: endDate,
+      customerId,
+      services: servicesWithPrices,
+      status: ENUM_BOOKING_STATUS.BOOKED,
+      totalPrice,
+      totalDuration,
+      slotHeld: true,
+    },
     customerId,
-    services: servicesWithPrices,
-    status: ENUM_BOOKING_STATUS.BOOKED,
-    totalPrice,
-    totalDuration,
-  });
+  );
+
+  if (!created) {
+    return result;
+  }
 
   await Client.findByIdAndUpdate(
     shopId,
@@ -310,15 +404,12 @@ const createOnlineBooking = async (customerId: string, payload: any) => {
   // Check for conflicting bookings----------------
   const existingBookings = await Booking.find({
     staffId: payload.staffId,
-    $and: [{ startTime: { $lt: endDate }, endTime: { $gt: startDate } }],
-    status: { $in: [ENUM_BOOKING_STATUS.PENDING, ENUM_BOOKING_STATUS.BOOKED] },
+    startTime: { $lt: endDate },
+    endTime: { $gt: startDate },
+    status: { $in: ACTIVE_BOOKING_STATUSES },
   });
-  //check operation-------------
   if (existingBookings.length > 0) {
-    throw new AppError(
-      httpStatus.CONFLICT,
-      'The selected time slot is conflict with other booking. Please choose a different time.',
-    );
+    throw slotTakenError();
   }
 
   // Fetch blocked hours for the staff and shop
@@ -353,17 +444,24 @@ const createOnlineBooking = async (customerId: string, payload: any) => {
     );
   }
 
-  const result = await Booking.create({
-    ...payload,
-    shopCategoryId: shop.shopCategoryId,
-    startTime: startDate,
-    endTime: endDate,
+  const { booking: result, created } = await claimBookingSlot(
+    {
+      ...payload,
+      shopCategoryId: shop.shopCategoryId,
+      startTime: startDate,
+      endTime: endDate,
+      customerId,
+      services: servicesWithPrices,
+      status: ENUM_BOOKING_STATUS.PENDING,
+      totalPrice,
+      totalDuration,
+      slotHeld: true,
+    },
     customerId,
-    services: servicesWithPrices,
-    status: ENUM_BOOKING_STATUS.PENDING,
-    totalPrice,
-    totalDuration,
-  });
+  );
+  if (!created) {
+    throw slotTakenError();
+  }
 
   console.log('Booking created with ID:', result);
 
@@ -1155,7 +1253,7 @@ const completePayOnShopBooking = async (
   }
   const result = await Booking.findOneAndUpdate(
     { _id: bookingId, status: ENUM_BOOKING_STATUS.BOOKED },
-    { $set: { status: ENUM_BOOKING_STATUS.COMPLETED, isNoShow } },
+    { $set: { status: ENUM_BOOKING_STATUS.COMPLETED, isNoShow, slotHeld: false } },
     { new: true, runValidators: true },
   );
   if (!result) {

@@ -63,9 +63,21 @@ const BookingSchema = new Schema<IBooking>(
     // set when staff marks the customer as a no-show; pay-on-shop no-shows
     // never collect payment, so they must not count as revenue
     isNoShow: { type: Boolean, default: false },
+    // True only while this row occupies the staff slot (pending or booked).
+    // Cleared on complete/cancel so the partial unique index releases the time.
+    slotHeld: { type: Boolean, select: false },
   },
   {
     timestamps: true,
+  },
+);
+
+BookingSchema.index(
+  { staffId: 1, startTime: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { slotHeld: true },
+    name: 'unique_held_staff_start',
   },
 );
 

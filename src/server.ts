@@ -10,6 +10,7 @@ import seedSuperAdmin from './app/DB';
 import { errorLogger, logger } from './app/shared/logger';
 import { initializeSocket } from './app/socket/socketManager';
 import './app/modules/notification/notification.listener';
+import Booking from './app/modules/booking/booking.model';
 import BookingTransfer from './app/modules/booking/bookingTransfer.model';
 import BookingFinancialOperation from './app/modules/booking/bookingFinancialOperation.model';
 import Notification from './app/modules/notification/notification.model';
@@ -22,6 +23,7 @@ async function main() {
     await mongoose.connect(config.database_url as string);
     logger.info('DB Connected Successfully');
     await Promise.all([
+      Booking.createIndexes(),
       BookingTransfer.createIndexes(),
       BookingFinancialOperation.createIndexes(),
       Notification.createIndexes(),
