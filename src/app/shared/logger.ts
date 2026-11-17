@@ -21,10 +21,7 @@ export const logger = createLogger({
   format: combine(label({ label: 'Food Delivery' }), timestamp(), myFormat),
   transports: [
     new transports.Console(),
-    new transports.File({
-      level: 'info',
-      filename: path.join(logDir, 'successes', 'um-success.log'),
-    }),
+    // Only rotated files: logs are kept for 14 days at most.
 
     new DailyRotateFile({
       level: 'info',

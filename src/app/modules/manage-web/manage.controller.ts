@@ -68,7 +68,7 @@ const getImprint = catchAsync(async (req: Request, res: Response) => {
   });
 });
 const getPrivacyPolicy = catchAsync(async (req: Request, res: Response) => {
-  const result = await ManageService.getPrivacyPolicy();
+  const result = await ManageService.getPrivacyPolicy(req.query.app);
   sendResponse(res, {
     statusCode: 200,
     success: true,
@@ -86,7 +86,7 @@ const getAboutUs = catchAsync(async (req: Request, res: Response) => {
   });
 });
 const getTermsConditions = catchAsync(async (req: Request, res: Response) => {
-  const result = await ManageService.getTermsConditions();
+  const result = await ManageService.getTermsConditions(req.query.app);
   sendResponse(res, {
     statusCode: 200,
     success: true,

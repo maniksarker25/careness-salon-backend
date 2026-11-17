@@ -3,13 +3,30 @@ import httpStatus from 'http-status';
 import QueryBuilder from '../../builder/QueryBuilder';
 import AppError from '../../error/appError';
 import Customer from './customer.model';
+import { User } from '../user/user.model';
+import { UserStatus } from '../user/user.constant';
 import { ICompleteCustomer, ICustomer } from './customer.interface';
 
 //!TODO: need to get total speeding for this customer ----
 const getAllCustomer = async (query: Record<string, any>) => {
+  // `status` lives on the User document, not on Customer, so translate it
+  // into a filter on the linked user ids instead of passing it through.
+  const { status, ...restQuery } = query;
+  const baseFilter: Record<string, any> = {};
+  if (status) {
+    if (!UserStatus.includes(status)) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        `Invalid status. Use one of: ${UserStatus.join(', ')}`,
+      );
+    }
+    const userIds = await User.find({ status }).distinct('_id');
+    baseFilter.user = { $in: userIds };
+  }
+
   const customerQuery = new QueryBuilder(
-    Customer.find().populate({ path: 'user', select: 'status' }),
-    query,
+    Customer.find(baseFilter).populate({ path: 'user', select: 'status' }),
+    restQuery,
   )
     .search(['firstName', 'lastName', 'email'])
     .filter()

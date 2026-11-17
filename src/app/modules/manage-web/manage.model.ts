@@ -1,11 +1,19 @@
 import mongoose, { model } from 'mongoose';
 
 //! Privacy and policy
+// Customers and salon owners (clients) get separate policies. `description`
+// is the legacy single policy; it mirrors the customer policy so older app
+// builds that only read `description` keep working.
 const privacySchema = new mongoose.Schema(
   {
     description: {
       type: String,
-      required: true,
+    },
+    descriptionForCustomerApp: {
+      type: String,
+    },
+    descriptionForClientApp: {
+      type: String,
     },
   },
   {

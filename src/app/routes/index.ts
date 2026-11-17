@@ -29,6 +29,7 @@ import { notificationRoutes } from '../modules/notification/notification.routes'
 import { uploadRoutes } from '../modules/file-upload/fileUpload.routes';
 import { conversationRoutes } from '../modules/conversation/conversation.routes';
 import { messageRoutes } from '../modules/message/message.routes';
+import { supportRoutes } from '../modules/support/support.routes';
 
 const router = Router();
 
@@ -152,6 +153,10 @@ const moduleRoutes = [
   {
     path: '/message',
     router: messageRoutes,
+  },
+  {
+    path: '/support',
+    router: supportRoutes,
   },
 ];
 

@@ -21,6 +21,7 @@ const sendEmail = async (options: {
   subject: string;
   html: any;
   attachments?: any[];
+  replyTo?: string;
 }) => {
   const { email, subject, html } = options;
 
@@ -59,6 +60,7 @@ const sendEmail = async (options: {
     to: email,
     subject,
     html,
+    ...(options.replyTo && { replyTo: options.replyTo }),
     ...(allAttachments.length > 0 && { attachments: allAttachments }),
   });
 

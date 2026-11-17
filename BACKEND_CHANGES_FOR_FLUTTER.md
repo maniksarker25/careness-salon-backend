@@ -138,6 +138,81 @@ Backend এখন সেভ করার আগে স্বয়ংক্র�
 
 ---
 
+## 🔴 9. Legal Content: Customer আর Salon App-এর জন্য আলাদা Terms ও Privacy Policy, আর Imprint
+
+Admin dashboard থেকে এখন তিনটা legal document upload/edit করা যায়: **Terms & Conditions**, **Privacy Policy** (দুটোই customer app আর salon owner app-এর জন্য আলাদা), আর **Imprint (Impressum)**, যেটা দুই app-এই একই।
+
+**নতুন: `?app=customer` বা `?app=client` query param** (public, token লাগবে না)। দিলে response শুধু সেই app-এর text দেয়, একই shape-এ:
+
+```
+GET /manage/get-terms-conditions?app=customer   → customer app
+GET /manage/get-terms-conditions?app=client     → salon owner app
+GET /manage/get-privacy-policy?app=customer
+GET /manage/get-privacy-policy?app=client
+GET /manage/get-imprint                          → দুই app-ই (আগের মতো)
+```
+
+```json
+{ "success": true, "data": { "_id": "...", "app": "customer", "description": "<p>HTML…</p>", "updatedAt": "2026-11-17T10:00:00.000Z" } }
+```
+
+- `description` HTML; app-এ HTML widget/WebView দিয়ে render করো।
+- ভুল `app` value দিলে `400`।
+- `app` না দিলে আগের মতো পুরো document আসে (backward compatible)। Privacy document-এ এখন `descriptionForCustomerApp` আর `descriptionForClientApp` আছে; পুরোনো `description` field-ও থাকছে।
+- পুরোনো app build যেগুলো privacy-র `description` পড়ে, সেগুলো customer privacy policy পাবে। Salon-এর আলাদা policy publish না করা পর্যন্ত `?app=client` পুরোনো shared text দেয়।
+
+**App Action:**
+- Customer app: terms ও privacy screen-এ `?app=customer` ব্যবহার করো।
+- Salon owner app: `?app=client` ব্যবহার করো (আগে সব user একই privacy policy দেখতো)।
+- দুই app-এ Settings থেকে সর্বোচ্চ ২ tap-এর মধ্যে একটা **Imprint** screen রাখো (`GET /manage/get-imprint`)। জার্মানিতে এটা আইনত বাধ্যতামূলক (§ 5 DDG)।
+
+---
+
+## 🟡 10. Public Web Pages আর Support Form
+
+Login ছাড়া খোলা যায় এমন public page (admin dashboard domain-এ), app-এর WebView বা App Store / Play Store listing-এ link হিসেবে দেওয়া যাবে:
+
+```
+https://admin.carenes.de/terms-conditions?type=customer   (বা ?type=salon)
+https://admin.carenes.de/privacy-policy?type=customer     (বা ?type=salon)
+https://admin.carenes.de/imprint
+https://admin.carenes.de/support
+```
+
+Terms আর Privacy page-এ Customer / Salon owner toggle আছে; `?type=` দিয়ে কোনটা আগে খুলবে ঠিক করা যায়।
+
+**নতুন public endpoint:** `POST /support/contact` (token লাগবে না, প্রতি IP ১৫ মিনিটে ৫টা request)
+
+```json
+{ "name": "Anna Müller", "email": "anna@example.de", "phone": "+49 151 1234567", "userType": "customer", "message": "At least 10 characters…" }
+```
+
+- `phone` আর `userType` (`customer` | `salon` | `other`) optional।
+- Message system email-এ যায় (`SUPPORT_EMAIL`, না থাকলে `SUPER_ADMIN_EMAIL`)। Reply-To user-এর email, তাই সরাসরি reply করা যায়।
+- Validation fail হলে `400`, limit পার হলে `429`, email পাঠাতে না পারলে `502`; তিনটাতেই `message` field থাকে।
+
+**App Action:** চাইলে app-এর ভেতরে native support form বানাতে এই endpoint ব্যবহার করো, অথবা `/support` page WebView-এ খোলো।
+
+---
+
+## 🔴 11. Review শুধু Completed Booking-এর পরে, আর Cancel হলে Pay-on-Shop Fee ফেরত
+
+**Endpoint:** `POST /rating/create`
+
+- Customer এখন review দিতে পারবে শুধু সেই salon-এ **completed** (no-show না) booking থাকলে, আর যে staff সেবা দিয়েছে শুধু তাকেই rate করা যাবে।
+- প্রতিটা completed visit-এ একটা review।
+- `shopRating` আর `staffRating` এখন 1–5 হতে হবে; review text সর্বোচ্চ 2000 character।
+- Error: `403` (completed visit নেই বা ভুল staff), `409` (এই visit-এর review আগেই দেওয়া হয়েছে)। দুটোতেই `message` field থাকে।
+
+**Salon app:** pay-on-shop booking দুই পক্ষের সম্মতিতে cancel হলে €5 fee এখন due amount থেকে কেটে যায়। Salon account delete করা যাবে না যতক্ষণ €10 বা তার বেশি fee বাকি।
+
+**App Action:**
+- "Rate" button শুধু completed booking-এ দেখাও।
+- 403/409 এলে backend-এর `message` দেখাও।
+- Salon-এর delete-account error message দেখাও।
+
+---
+
 ## Quick Summary Table
 
 | # | Feature | Endpoint(s) | App Action Needed |
@@ -150,3 +225,6 @@ Backend এখন সেভ করার আগে স্বয়ংক্র�
 | 6 | Pay-on-shop transaction log | `/transaction/*` | 🟡 FYI only (data will just appear) |
 | 7 | Sales: recognized vs pending | `/meta/get-meta-data`, `/meta/sales-profit-chart-data` | 🔴 Show new `pendingSales` field |
 | 8 | Auto-complete bookings (3hr grace) | `/booking/get-customer-bookings`, `/booking/get-shop-bookings` | 🔴 Verify review-eligibility & no-show deadline UX |
+| 9 | Separate legal texts per app + Imprint | `/manage/get-terms-conditions`, `/manage/get-privacy-policy`, `/manage/get-imprint` | 🔴 Use `?app=customer` / `?app=client`, add Imprint screen |
+| 10 | Public legal pages + support form | `POST /support/contact` | 🟡 Optional: link pages / use endpoint |
+| 11 | Verified reviews + fee release on cancel | `/rating/create`, `/user/delete-account` | 🔴 Show Rate only for completed bookings; show error messages |

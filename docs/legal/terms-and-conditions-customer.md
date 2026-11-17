@@ -1,3 +1,5 @@
+> ⛔ **SUPERSEDED (2026-11-17):** contains outdated facts. Use `terms-customer.html` / `terms-salon.html`. See `REVIEW-terms-2026-11-17.md`.
+
 # Carenes – Nutzungsbedingungen für Kunden (Customer App)
 
 > **Ziel-Feld im Backend:** `TermsConditions.descriptionForCustomerApp`

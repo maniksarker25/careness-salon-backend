@@ -21,6 +21,11 @@ import Client from '../client/client.model';
 import { ICustomer } from '../customer/customer.interface';
 import Customer from '../customer/customer.model';
 import { upsertDevice } from '../device/device.service';
+import { Device } from '../device/device.model';
+import Notification from '../notification/notification.model';
+import ShopBookmark from '../shopBookmak/shop.bookmark.model';
+import ProductBookmark from '../productBookmark/product.bookmark.model';
+import Cart from '../cart/cart.model';
 import Staff from '../staff/staff.model';
 import SuperAdmin from '../superAdmin/superAdmin.model';
 import { USER_ROLE } from './user.constant';
@@ -361,6 +366,17 @@ const blockUnblockUser = async (id: string, status: string) => {
   return result;
 };
 
+// Data that only exists for the deleted user (push tokens, notifications).
+// Bookings, payments and chats are kept: they are needed for statutory
+// retention or belong to the other party as well.
+const removePersonalTraces = async (
+  profileId: string,
+  session: mongoose.ClientSession,
+) => {
+  await Device.deleteMany({ userId: profileId }).session(session);
+  await Notification.deleteMany({ receiver: profileId }).session(session);
+};
+
 const deleteAccount = async (
   userData: JwtPayload,
   payload: { password: string },
@@ -398,12 +414,40 @@ const deleteAccount = async (
             'You have to complete all upcoming bookings or cancel these bookings and then you can delete your account.',
           );
         }
+
+        // Payable platform fees (the in-app minimum is 10 EUR) must be settled
+        // first, otherwise the debt record is deleted with the account.
+        // Smaller balances cannot be paid in the app and are written off.
+        if ((client.payOnShopChargeDueAmount ?? 0) >= 10) {
+          throw new AppError(
+            httpStatus.BAD_REQUEST,
+            'Please pay your open pay-on-shop fees before deleting your account.',
+          );
+        }
       }
-      await Client.findOneAndDelete({ user: userData.id }).session(session);
+      const deletedClient = await Client.findOneAndDelete({
+        user: userData.id,
+      }).session(session);
+      if (deletedClient) {
+        await removePersonalTraces(deletedClient._id.toString(), session);
+        // Staff data is processed on the salon's behalf and goes with it.
+        await Staff.deleteMany({ shop: deletedClient._id }).session(session);
+      }
     }
 
     if (userData.role === USER_ROLE.customer) {
-      await Customer.findOneAndDelete({ user: userData.id }).session(session);
+      const deletedCustomer = await Customer.findOneAndDelete({
+        user: userData.id,
+      }).session(session);
+      if (deletedCustomer) {
+        const customerId = deletedCustomer._id;
+        await removePersonalTraces(customerId.toString(), session);
+        await ShopBookmark.deleteMany({ costumer: customerId }).session(session);
+        await ProductBookmark.deleteMany({ costumer: customerId }).session(
+          session,
+        );
+        await Cart.deleteMany({ customer: customerId }).session(session);
+      }
     }
 
     await User.findByIdAndDelete(userData.id).session(session);

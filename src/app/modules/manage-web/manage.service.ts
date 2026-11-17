@@ -28,21 +28,73 @@ const getImprint = async () => {
   return await Imprint.findOne();
 };
 
+//! Shared helpers for per-app legal documents (customer app vs salon/client app)
+export const LEGAL_APPS = ['customer', 'client'] as const;
+export type TLegalApp = (typeof LEGAL_APPS)[number];
+
+const LEGAL_APP_FIELD: Record<TLegalApp, string> = {
+  customer: 'descriptionForCustomerApp',
+  client: 'descriptionForClientApp',
+};
+
+const assertLegalApp = (app?: unknown): TLegalApp | undefined => {
+  if (app === undefined || app === null || app === '') return undefined;
+  if (!LEGAL_APPS.includes(app as TLegalApp)) {
+    throw new AppError(
+      400,
+      `Invalid app "${String(app)}". Use one of: ${LEGAL_APPS.join(', ')}`,
+    );
+  }
+  return app as TLegalApp;
+};
+
+// Keep only the string fields we allow to be written.
+const pickStrings = (payload: any, allowed: string[]) => {
+  const update: Record<string, string> = {};
+  for (const key of allowed) {
+    if (typeof payload?.[key] === 'string') update[key] = payload[key];
+  }
+  return update;
+};
+
+// Shape returned to the mobile apps when they ask for one app's document.
+const toAppDocument = (
+  doc: any,
+  app: TLegalApp,
+  legacyFallback?: string,
+) => ({
+  _id: doc?._id,
+  app,
+  description: doc?.[LEGAL_APP_FIELD[app]] || legacyFallback || '',
+  updatedAt: doc?.updatedAt,
+});
+
 //! Privacy and policy
 const addPrivacyPolicy = async (payload: any) => {
-  const checkIsExist = await PrivacyPolicy.findOne();
-  if (checkIsExist) {
-    await PrivacyPolicy.findOneAndUpdate({}, payload, {
-      new: true,
-
-      runValidators: true,
-    });
-  } else {
-    return await PrivacyPolicy.create(payload);
+  const update = pickStrings(payload, [
+    'description',
+    'descriptionForCustomerApp',
+    'descriptionForClientApp',
+  ]);
+  if (!Object.keys(update).length) {
+    throw new AppError(400, 'Privacy policy content is required');
   }
+  // Older app builds only read `description`; keep it in sync with the
+  // customer policy so they still show a valid text.
+  if (update.descriptionForCustomerApp !== undefined) {
+    update.description = update.descriptionForCustomerApp;
+  }
+  return await PrivacyPolicy.findOneAndUpdate(
+    {},
+    { $set: update },
+    { new: true, upsert: true, runValidators: true },
+  );
 };
-const getPrivacyPolicy = async () => {
-  return await PrivacyPolicy.findOne();
+const getPrivacyPolicy = async (app?: unknown) => {
+  const legalApp = assertLegalApp(app);
+  const doc: any = await PrivacyPolicy.findOne().lean();
+  if (!legalApp) return doc;
+  return toAppDocument(doc, legalApp, doc?.description);
 };
 const editPrivacyPolicy = async (
   id: string,
@@ -101,19 +153,24 @@ const deleteAboutUs = async (id: string) => {
 };
 //! Terms Conditions
 const addTermsConditions = async (payload: any) => {
-  const checkIsExist = await TermsConditions.findOne();
-  if (checkIsExist) {
-    await TermsConditions.findOneAndUpdate({}, payload, {
-      new: true,
-
-      runValidators: true,
-    });
-  } else {
-    return await TermsConditions.create(payload);
+  const update = pickStrings(payload, [
+    'descriptionForCustomerApp',
+    'descriptionForClientApp',
+  ]);
+  if (!Object.keys(update).length) {
+    throw new AppError(400, 'Terms and conditions content is required');
   }
+  return await TermsConditions.findOneAndUpdate(
+    {},
+    { $set: update },
+    { new: true, upsert: true, runValidators: true },
+  );
 };
-const getTermsConditions = async () => {
-  return await TermsConditions.findOne();
+const getTermsConditions = async (app?: unknown) => {
+  const legalApp = assertLegalApp(app);
+  const doc: any = await TermsConditions.findOne().lean();
+  if (!legalApp) return doc;
+  return toAppDocument(doc, legalApp);
 };
 const editTermsConditions = async (
   id: string,

@@ -39,6 +39,11 @@ export default {
     phoneNumber: process.env.TWILIO_PHONE_NUMBER,
   },
   // resend for email -------------
+  // Inbox that receives messages from the public support form.
+  support_email:
+    process.env.SUPPORT_EMAIL ||
+    process.env.SUPER_ADMIN_EMAIL ||
+    process.env.RESEND_FROM_EMAIL,
   resend: {
     api_key: process.env.RESEND_API_KEY,
     from_email: process.env.RESEND_FROM_EMAIL,

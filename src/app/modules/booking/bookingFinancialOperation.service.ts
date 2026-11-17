@@ -11,6 +11,23 @@ import {
 } from '../notification/notification.enum';
 import { USER_ROLE } from '../user/user.constant';
 import Booking from './booking.model';
+import Client from '../client/client.model';
+import { payonShopChargePerBooking } from '../../constant';
+import { ENUM_PAYMENT_TYPE } from '../../utilities/enum';
+
+// A cancelled pay-on-shop booking never happened, so the flat platform fee
+// added when it was booked is released. Called only right after the atomic
+// booked -> canceled transition, so it runs once per booking.
+const releasePayOnShopFee = async (booking: {
+  paymentType?: string;
+  shopId?: unknown;
+}) => {
+  if (booking.paymentType !== ENUM_PAYMENT_TYPE.PAY_ON_SHOP) return;
+  await Client.updateOne(
+    { _id: booking.shopId, payOnShopChargeDueAmount: { $gte: payonShopChargePerBooking } },
+    { $inc: { payOnShopChargeDueAmount: -payonShopChargePerBooking } },
+  );
+};
 import BookingTransfer, {
   BOOKING_TRANSFER_PURPOSE,
   BOOKING_TRANSFER_STATUS,
@@ -142,6 +159,9 @@ export const claimBookingFinancialOperation = async (
     { $set: { status: targetStatus, slotHeld: false } },
     { new: true, runValidators: true },
   );
+  if (booking && targetStatus === 'canceled') {
+    await releasePayOnShopFee(booking);
+  }
   if (!booking) {
     const currentBooking = await Booking.findById(input.bookingId).select(
       'status',
@@ -374,6 +394,9 @@ const processFinancialOperation = async (operationId: string) => {
       { $set: { status: targetStatus, slotHeld: false } },
       { new: true },
     );
+    if (booking && targetStatus === 'canceled') {
+      await releasePayOnShopFee(booking);
+    }
     if (!booking) {
       const currentBooking = await Booking.findById(
         operation.bookingId,

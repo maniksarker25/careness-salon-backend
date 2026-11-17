@@ -6,17 +6,19 @@ const ratingValidationSchema = z.object({
       .number({
         required_error: 'Shop rating is required',
       })
+      .min(1, { message: 'Shop rating minimum 1' })
       .max(5, { message: 'Shop rating maximum 5' }),
     shopRatingDescription: z
-      .string({
-        required_error: 'Shop rating description is required',
-      })
+      .string()
+      .trim()
+      .max(2000, { message: 'Review text is too long (max 2000 characters)' })
       .optional(),
     staffRating: z
       .number({
         required_error: 'Staff rating is required',
       })
-      .max(5, { message: 'Shop rating maximum 5' }),
+      .min(1, { message: 'Staff rating minimum 1' })
+      .max(5, { message: 'Staff rating maximum 5' }),
   }),
 });
 

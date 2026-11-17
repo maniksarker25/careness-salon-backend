@@ -6,11 +6,11 @@ const getAllTransaction = async (query: Record<string, unknown>) => {
     Transaction.find()
       .populate({
         path: 'senderEntityId',
-        select: 'firstName lastName profile_image',
+        select: 'firstName lastName profile_image shopName shopImages',
       })
       .populate({
         path: 'receiverEntityId',
-        select: 'firstName lastName profile_image',
+        select: 'firstName lastName profile_image shopName shopImages',
       }),
     query,
   )
@@ -40,11 +40,11 @@ const getClientTransaction = async (
     })
       .populate({
         path: 'senderEntityId',
-        select: 'firstName lastName profile_image',
+        select: 'firstName lastName profile_image shopName shopImages',
       })
       .populate({
         path: 'receiverEntityId',
-        select: 'firstName lastName profile_image',
+        select: 'firstName lastName profile_image shopName shopImages',
       }),
     query,
   )
