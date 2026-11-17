@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SUPPORT_TICKET_STATUS, SUPPORT_USER_TYPES } from './support.model';
 
 const contactSupportValidationSchema = z.object({
   body: z.object({
@@ -18,7 +19,7 @@ const contactSupportValidationSchema = z.object({
       .max(30, 'Phone number is too long')
       .regex(/^[+\d\s()/-]*$/, 'Please enter a valid phone number')
       .optional(),
-    userType: z.enum(['customer', 'salon', 'other']).optional(),
+    userType: z.enum(SUPPORT_USER_TYPES).optional(),
     message: z
       .string({ required_error: 'Message is required' })
       .trim()
@@ -29,4 +30,18 @@ const contactSupportValidationSchema = z.object({
   }),
 });
 
-export const SupportValidations = { contactSupportValidationSchema };
+const updateTicketValidationSchema = z.object({
+  body: z
+    .object({
+      status: z.enum(SUPPORT_TICKET_STATUS).optional(),
+      adminNote: z.string().trim().max(2000, 'Note is too long').optional(),
+    })
+    .refine((b) => b.status !== undefined || b.adminNote !== undefined, {
+      message: 'Provide a status or a note to update',
+    }),
+});
+
+export const SupportValidations = {
+  contactSupportValidationSchema,
+  updateTicketValidationSchema,
+};

@@ -33,4 +33,54 @@ const contactSupport = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-export const SupportController = { contactSupport };
+const getTickets = catchAsync(async (req: Request, res: Response) => {
+  const result = await SupportService.getTickets(req.query);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Support requests retrieved successfully',
+    data: result,
+  });
+});
+
+const getTicket = catchAsync(async (req: Request, res: Response) => {
+  const result = await SupportService.getTicket(req.params.id);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Support request retrieved successfully',
+    data: result,
+  });
+});
+
+const updateTicket = catchAsync(async (req: Request, res: Response) => {
+  const { status, adminNote } = req.body;
+  const result = await SupportService.updateTicket(req.params.id, {
+    status,
+    adminNote: typeof adminNote === 'string' ? adminNote.trim() : undefined,
+  });
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Support request updated successfully',
+    data: result,
+  });
+});
+
+const deleteTicket = catchAsync(async (req: Request, res: Response) => {
+  const result = await SupportService.deleteTicket(req.params.id);
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: 'Support request deleted successfully',
+    data: result,
+  });
+});
+
+export const SupportController = {
+  contactSupport,
+  getTickets,
+  getTicket,
+  updateTicket,
+  deleteTicket,
+};

@@ -191,6 +191,9 @@ Terms আর Privacy page-এ Customer / Salon owner toggle আছে; `?type=` 
 - Message system email-এ যায় (`SUPPORT_EMAIL`, না থাকলে `SUPER_ADMIN_EMAIL`)। Reply-To user-এর email, তাই সরাসরি reply করা যায়।
 - Validation fail হলে `400`, limit পার হলে `429`, email পাঠাতে না পারলে `502`; তিনটাতেই `message` field থাকে।
 
+- প্রতিটা message এখন database-এ **support ticket** হিসেবে save হয় (status: `pending` → `processing` → `resolved`), admin dashboard-এর **Support requests** page থেকে manage করা হয়। Email না গেলেও message হারায় না।
+- Success response-এ এখন `ticketId` ফেরত আসে।
+
 **App Action:** চাইলে app-এর ভেতরে native support form বানাতে এই endpoint ব্যবহার করো, অথবা `/support` page WebView-এ খোলো।
 
 ---
