@@ -559,8 +559,63 @@ const createOnlineBooking = async (customerId: string, payload: any) => {
   }
 };
 
-const createBooking = async (customerId: string, payload: any) => {
+const optionalText = (value: unknown, maxLength: number) => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new AppError(httpStatus.BAD_REQUEST, 'Invalid text value');
+  }
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      `Text must be at most ${maxLength} characters`,
+    );
+  }
+  return trimmed || undefined;
+};
+
+// Customer bookings record terms acceptance; shop (self) bookings may carry
+// walk-in customer details. Client-sent values for the other side are dropped.
+const prepareBookingPayload = (customerId: string | undefined, raw: any) => {
+  const {
+    walkInCustomerName,
+    walkInCustomerPhone,
+    termsAccepted,
+    termsVersion,
+    ...payload
+  } = raw ?? {};
+  // only the server sets the acceptance timestamp
+  delete payload.termsAcceptedAt;
+
+  if (!customerId) {
+    // booking created by the shop for a walk-in customer
+    return {
+      ...payload,
+      walkInCustomerName: optionalText(walkInCustomerName, 100),
+      walkInCustomerPhone: optionalText(walkInCustomerPhone, 30),
+    };
+  }
+
+  if (termsAccepted === true) {
+    return {
+      ...payload,
+      termsAcceptedAt: new Date(),
+      termsVersion: optionalText(termsVersion, 50),
+    };
+  }
+
+  if (config.require_terms_acceptance) {
+    throw new AppError(
+      httpStatus.BAD_REQUEST,
+      'Terms and privacy policy must be accepted before booking',
+    );
+  }
+  return payload;
+};
+
+const createBooking = async (customerId: string, rawPayload: any) => {
   let result;
+  const payload = prepareBookingPayload(customerId, rawPayload);
   const { paymentType } = payload;
 
   if (paymentType === ENUM_PAYMENT_TYPE.PAY_ON_SHOP) {
@@ -607,7 +662,7 @@ const getSingleBooking = async (id: string) => {
   const result = await Booking.findById(id)
     .populate({
       path: 'shopId',
-      select: 'shopImages shopName location',
+      select: 'shopImages shopName location address',
     })
     .populate({
       path: 'services.serviceId',
@@ -976,7 +1031,7 @@ const getPayOnShopBookingHistory = async (
       shopId: shopId,
       paymentType: ENUM_PAYMENT_TYPE.PAY_ON_SHOP,
       status: { $ne: ENUM_BOOKING_STATUS.CANCELED },
-    }).select('startTime endTime totalPrice services'),
+    }).select('startTime endTime totalPrice services walkInCustomerName'),
     query,
   )
     .search([])
@@ -990,11 +1045,23 @@ const getPayOnShopBookingHistory = async (
     model: 'Service',
     select: 'serviceName price',
   });
-  const meta = await payOnShopBookingQuery.countTotal();
-  const result = await payOnShopBookingQuery.modelQuery;
+  const [meta, result, shop] = await Promise.all([
+    payOnShopBookingQuery.countTotal(),
+    payOnShopBookingQuery.modelQuery,
+    Client.findById(shopId).select('payOnShopChargeDueAmount'),
+  ]);
+
+  // Explains the "Total Payable Amount": a flat platform fee per pay-on-shop
+  // booking, accumulated in payOnShopChargeDueAmount until the shop pays it.
+  const summary = {
+    chargePerBooking: payonShopChargePerBooking,
+    totalDueAmount: shop?.payOnShopChargeDueAmount ?? 0,
+    currency: 'EUR',
+  };
 
   return {
     meta,
+    summary,
     result,
   };
 };

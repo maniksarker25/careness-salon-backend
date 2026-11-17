@@ -48,4 +48,7 @@ export default {
     appId: process.env.ONESIGNAL_APP_ID,
     apiKey: process.env.ONESIGNAL_API_KEY,
   },
+  // When "true", customer bookings are rejected unless the app sends
+  // `termsAccepted: true`. Keep off until the app version that sends it ships.
+  require_terms_acceptance: process.env.REQUIRE_TERMS_ACCEPTANCE === 'true',
 };

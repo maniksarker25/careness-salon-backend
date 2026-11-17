@@ -66,6 +66,12 @@ const BookingSchema = new Schema<IBooking>(
     // True only while this row occupies the staff slot (pending or booked).
     // Cleared on complete/cancel so the partial unique index releases the time.
     slotHeld: { type: Boolean, select: false },
+    // Walk-in customer details, only set on bookings the shop creates itself.
+    walkInCustomerName: { type: String, trim: true, maxlength: 100 },
+    walkInCustomerPhone: { type: String, trim: true, maxlength: 30 },
+    // Proof that the customer accepted the terms and privacy policy.
+    termsAcceptedAt: { type: Date },
+    termsVersion: { type: String, trim: true, maxlength: 50 },
   },
   {
     timestamps: true,

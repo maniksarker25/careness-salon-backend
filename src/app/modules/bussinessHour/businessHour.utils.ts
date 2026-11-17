@@ -17,7 +17,25 @@ export type TEffectiveHours =
 
 const CLOSED: TEffectiveHours = { isOpen: false };
 
-const TIME_REGEX = /^([01]?\d|2[0-3]):([0-5]\d)$/;
+// German week order (Monday first). Used to sort business hours for display,
+// since documents come back from MongoDB in insertion order.
+export const WEEKDAY_ORDER = [
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+  'Sunday',
+];
+
+export const sortByWeekday = <T extends { day?: string }>(items: T[]): T[] =>
+  [...items].sort(
+    (a, b) =>
+      WEEKDAY_ORDER.indexOf(a.day ?? '') - WEEKDAY_ORDER.indexOf(b.day ?? ''),
+  );
+
+const TIME_REGEX =/^([01]?\d|2[0-3]):([0-5]\d)$/;
 
 /** Normalizes "9:00" -> "09:00". Returns null for anything that isn't a time. */
 export const normalizeTime = (value: unknown): string | null => {

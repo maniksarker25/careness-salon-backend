@@ -31,5 +31,11 @@ export interface IBooking {
   checkoutSessionId?: string;
   isNoShow?: boolean;
   slotHeld?: boolean;
+  // walk-in customer entered by the shop (self-booking, no customer account)
+  walkInCustomerName?: string;
+  walkInCustomerPhone?: string;
+  // when the customer accepted the terms/privacy policy for this booking
+  termsAcceptedAt?: Date;
+  termsVersion?: string;
   note: string;
 }

@@ -6,11 +6,27 @@ import {
   AboutUs,
   ContactUs,
   FAQ,
+  Imprint,
   PrivacyPolicy,
   Slider,
   TermsConditions,
 } from './manage.model';
 import AppError from '../../error/appError';
+
+//! Imprint (single document, upserted)
+const addImprint = async (payload: { description: string }) => {
+  if (!payload?.description?.trim()) {
+    throw new AppError(400, 'Imprint description is required');
+  }
+  return await Imprint.findOneAndUpdate(
+    {},
+    { description: payload.description },
+    { new: true, upsert: true, runValidators: true },
+  );
+};
+const getImprint = async () => {
+  return await Imprint.findOne();
+};
 
 //! Privacy and policy
 const addPrivacyPolicy = async (payload: any) => {
@@ -233,6 +249,8 @@ const deleteSlider = async (id: string) => {
 };
 
 export const ManageService = {
+  addImprint,
+  getImprint,
   addPrivacyPolicy,
   addAboutUs,
   addTermsConditions,

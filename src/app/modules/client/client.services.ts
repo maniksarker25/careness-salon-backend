@@ -17,6 +17,7 @@ import {
 } from '../../utilities/enum';
 import Booking from '../booking/booking.model';
 import BusinessHour from '../bussinessHour/businessHour.model';
+import { sortByWeekday } from '../bussinessHour/businessHour.utils';
 import Category from '../category/category.model';
 import Discount from '../discount/discount.model';
 import Service from '../service/service.model';
@@ -200,8 +201,8 @@ const updateClientStatus = async (id: string, status: string) => {
       title: isActive ? 'Activate shop' : 'Deactivate shop',
       type: ENUM_NOTIFICATION_TYPE.GENERAL,
       message: isActive
-        ? 'Congratulations admin approved your shop.Please connect your bank information for receive payments'
-        : 'An Admin deactivate your shop , please contact with support',
+        ? 'Herzlichen Glückwunsch! Ihr Shop wurde freigegeben. Bitte verbinden Sie Ihr Bankkonto, um Zahlungen zu erhalten.'
+        : 'Ihr Shop wurde von einem Administrator deaktiviert. Bitte wenden Sie sich an den Support.',
       receiver: result._id,
     };
     if (!updateUser) {
@@ -383,16 +384,21 @@ const getNearbyShopWithTime = async (
     discountPercentage: discountMap[shop._id.toString()] || 0,
   }));
 };
+// German currency format, e.g. 5 -> "5,00 €"
+const formatEuro = (amount: number | undefined | null) =>
+  `${Number(amount ?? 0).toFixed(2).replace('.', ',')} €`;
+
 const getSingleShop = async (id: string) => {
   const currentDay = getCurrentDay();
   const now = new Date();
 
-  const [businessHour, shop] = await Promise.all([
-    BusinessHour.findOne({
+  const [weekHours, shop] = await Promise.all([
+    BusinessHour.find({
       entityId: id,
       entityType: 'Shop',
-      day: currentDay,
-    }).select('day openTime closeTime isClosed'),
+    })
+      .select('day openTime closeTime isClosed')
+      .lean(),
     Client.findById(id)
       .populate('shopCategoryId')
       .select(
@@ -404,6 +410,12 @@ const getSingleShop = async (id: string) => {
   if (!shop) {
     throw new AppError(httpStatus.NOT_FOUND, 'Shop not found');
   }
+
+  // Full week (Monday first) for the opening-hours section; `businessHour`
+  // keeps returning today's entry so older app builds keep working.
+  const businessHours = sortByWeekday(weekHours);
+  const businessHour =
+    businessHours.find((bh) => bh.day === currentDay) ?? null;
 
   const [categories, discount] = await Promise.all([
     Category.find({ shop: shop._id })
@@ -472,6 +484,7 @@ const getSingleShop = async (id: string) => {
     ...shop.toObject(),
     categories: categoriesWithServices,
     businessHour,
+    businessHours,
   };
 };
 
@@ -573,7 +586,7 @@ const notifyAllShopsForAdminFee = async () => {
   for (const shop of shops) {
     appEventEmitter.emit('admin-fee.alert', {
       title: 'Admin Fee Alert',
-      message: `Dear ${shop.shopName}, your current due charge is ${shop.payOnShopChargeDueAmount}. Please clear it to avoid penalties.`,
+      message: `Hallo ${shop.shopName}, Ihre offenen Gebühren betragen aktuell ${formatEuro(shop.payOnShopChargeDueAmount)}. Bitte begleichen Sie diesen Betrag, um Einschränkungen zu vermeiden.`,
       receiver: shop.user.toString(),
       type: ENUM_NOTIFICATION_TYPE.GENERAL,
       meta: {
@@ -591,7 +604,7 @@ const notifySingleShopsForAdminFee = async (shopId: string) => {
   }
   const notificationData = {
     title: 'Admin Fee Alert',
-    message: `Dear ${shop.shopName}, your current due charge is ${shop.payOnShopChargeDueAmount}. Please clear it to avoid penalties.`,
+    message: `Hallo ${shop.shopName}, Ihre offenen Gebühren betragen aktuell ${formatEuro(shop.payOnShopChargeDueAmount)}. Bitte begleichen Sie diesen Betrag, um Einschränkungen zu vermeiden.`,
     seen: false,
     receiver: shop.user.toString(),
     type: ENUM_NOTIFICATION_TYPE.GENERAL,

@@ -33,6 +33,13 @@ router.post(
   uploadFile(),
   ManageController.addSlider,
 );
+// Imprint (Impressum): admin creates/updates, apps read publicly
+router.post(
+  '/add-imprint',
+  auth(USER_ROLE.superAdmin, USER_ROLE.admin),
+  ManageController.addImprint,
+);
+router.get('/get-imprint', ManageController.getImprint);
 router.get(
   '/get-privacy-policy',
 

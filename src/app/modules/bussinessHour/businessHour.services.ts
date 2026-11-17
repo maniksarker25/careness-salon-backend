@@ -20,6 +20,7 @@ import {
   normalizeTime,
   ownsBusinessHour,
   resolveEffectiveHours,
+  sortByWeekday,
 } from './businessHour.utils';
 
 const AVAILABLE_DATES_WINDOW_DAYS = 5;
@@ -150,7 +151,7 @@ const getBusinessHour = async (entityId: string, entityType: string) => {
     BlockHour.find({ entityId, entityType }).lean(),
   ]);
 
-  return businessHours.map((bh) => ({
+  return sortByWeekday(businessHours).map((bh) => ({
     ...bh,
     blockHours: blockHours
       .filter((block) => block.day === bh.day)

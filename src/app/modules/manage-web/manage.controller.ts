@@ -49,6 +49,24 @@ const addFAQ = catchAsync(async (req: Request, res: Response) => {
     data: result,
   });
 });
+const addImprint = catchAsync(async (req: Request, res: Response) => {
+  const result = await ManageService.addImprint(req.body);
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Imprint saved successfully',
+    data: result,
+  });
+});
+const getImprint = catchAsync(async (req: Request, res: Response) => {
+  const result = await ManageService.getImprint();
+  sendResponse(res, {
+    statusCode: 200,
+    success: true,
+    message: 'Imprint retrieved successfully',
+    data: result,
+  });
+});
 const getPrivacyPolicy = catchAsync(async (req: Request, res: Response) => {
   const result = await ManageService.getPrivacyPolicy();
   sendResponse(res, {
@@ -228,6 +246,8 @@ const getSlider = catchAsync(async (req: Request, res: Response) => {
 });
 
 export const ManageController = {
+  addImprint,
+  getImprint,
   addSlider,
   getSlider,
   deleteSlider,

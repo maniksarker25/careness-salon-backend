@@ -30,6 +30,21 @@ const aboutUsSchema = new mongoose.Schema(
     },
   },
 );
+//! Imprint (Impressum, required in Germany by § 5 DDG)
+const imprintSchema = new mongoose.Schema(
+  {
+    description: {
+      type: String,
+      required: true,
+    },
+  },
+  {
+    timestamps: true,
+    toJSON: {
+      virtuals: true,
+    },
+  },
+);
 //! Terms Conditions
 const termsAndConditionsSchema = new mongoose.Schema(
   {
@@ -108,6 +123,7 @@ const sliderSchema = new mongoose.Schema(
 );
 export const PrivacyPolicy = model('PrivacyPolicy', privacySchema);
 export const AboutUs = model('AboutUs', aboutUsSchema);
+export const Imprint = model('Imprint', imprintSchema);
 export const TermsConditions = model(
   'TermsConditions',
   termsAndConditionsSchema,
